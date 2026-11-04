@@ -1,0 +1,371 @@
+// Protocol Buffer schema for the Rohde Ecotop 60 corner thermal and airflow
+// simulation model.
+
+syntax = "proto3";
+
+package kiln_sim;
+
+// Identifies the physical surface category of a discretized mesh patch.
+enum SurfaceType {
+  SURFACE_TYPE_UNSPECIFIED = 0;
+  SURFACE_TYPE_KILN_SIDE = 1;
+  SURFACE_TYPE_KILN_LID = 2;
+  SURFACE_TYPE_KILN_BOTTOM = 3;
+  SURFACE_TYPE_SHIELD_LEFT = 4;
+  SURFACE_TYPE_SHIELD_BACK = 5;
+  SURFACE_TYPE_GYPSUM_LEFT = 6;
+  SURFACE_TYPE_GYPSUM_BACK = 7;
+  SURFACE_TYPE_REFLECTOR_TOP = 8;
+  SURFACE_TYPE_SSR_BOX = 9;
+}
+
+// Top-level immutable input configuration message for a single simulation run.
+message SimulationConfig {
+  // Dimensions and clearances of the calcium silicate wall heat shields.
+  message ShieldGeometry {
+    // Horizontal width of the left-wall heat shield along the +x axis (mm).
+    double w_shield_left_mm = 1;
+    // Horizontal width of the back-wall heat shield along the +y axis (mm).
+    double w_shield_back_mm = 2;
+    // Vertical inlet air gap between the floor (z = 0) and shield bottom edge (mm).
+    double g_floor_mm = 3;
+    // Vertical outlet air gap between the shield top edge and ceiling (mm).
+    double g_ceil_mm = 4;
+    // Thickness of the calcium silicate shield board (mm).
+    double t_shield_mm = 5;
+  }
+
+  // Geometry of the ventilated air channel behind the wall heat shields.
+  message ChimneyGeometry {
+    // Depth of the air gap between the AAC block wall and the shield back face (mm).
+    double d_chimney_mm = 1;
+    // Fraction of the behind-shield air gap cross-section obstructed by battens (0.0 to 1.0).
+    double chimney_blockage_fraction = 2;
+    // Whether the vertical outer side edges of the chimney gap are closed off.
+    bool seal_chimney_sides = 3;
+  }
+
+  // Dimensions of the structural walls and room enclosure.
+  message RoomGeometry {
+    // Total interior wall height from structural screed (z = 0) to ceiling (mm).
+    double h_wall_mm = 1;
+    // Thickness of standard Class A2 gypsum plasterboard outside the shield zone (mm).
+    double t_gypsum_mm = 2;
+    // Thickness of the structural aerated autoclaved concrete (AAC) block wall (mm).
+    double t_aac_mm = 3;
+    // Interior room length along the +x axis from back wall to front wall (mm).
+    double l_room_mm = 4;
+    // Interior room width along the +y axis from left wall to partition wall (mm).
+    double w_room_mm = 5;
+    // Total width of the glass sliding door assembly on the front wall (mm).
+    double w_glass_door_mm = 6;
+    // Horizontal open slot width of the ajar sliding door during firing (mm).
+    double w_door_open_mm = 7;
+    // Vertical height of the sliding door opening (mm).
+    double h_door_mm = 8;
+    // Behind-shield air channel geometry associated with the corner walls.
+    ChimneyGeometry chimney = 9;
+  }
+
+  // Geometry and placement of the cylindrical kiln drum and lid.
+  message KilnGeometry {
+    // Clear horizontal standoff from the left shield front face to the kiln jacket (mm).
+    double s_kiln_left_mm = 1;
+    // Clear horizontal standoff from the back shield front face to the kiln jacket (mm).
+    double s_kiln_back_mm = 2;
+    // Outer diameter of the stainless steel kiln cylinder jacket (mm).
+    double d_kiln_mm = 3;
+    // Height of the cylindrical kiln drum body excluding the lid (mm).
+    double h_drum_mm = 4;
+    // Thickness of the closed refractory kiln lid (mm).
+    double t_lid_mm = 5;
+    // Clear vertical distance from the floor pad top surface (z_pad_top) to the kiln bottom plate (mm).
+    double h_kiln_base_mm = 6;
+  }
+
+  // Position and capture state of the side-mounted exhaust dilution bung.
+  message BungGeometry {
+    // Azimuthal angle of the exhaust bung counter-clockwise from +x (degrees).
+    double bung_angle_deg = 1;
+    // Radial distance from the vertical kiln centerline axis to the dilution cup (mm).
+    double r_bung_mm = 2;
+    // Vertical offset from the kiln bottom plate to the open top rim of the cup (mm).
+    double z_bung_offset_mm = 3;
+    // True if exhaust bung gas is captured directly via a local funnel/hose.
+    bool bung_captured = 4;
+  }
+
+  // Dimensions and mounting orientation of the louvered SSR electrical enclosure.
+  message SsrGeometry {
+    // Azimuthal mounting angle of the SSR enclosure counter-clockwise from +x (degrees).
+    double ssr_angle_deg = 1;
+    // Vertical offset from the kiln bottom plate to the bottom of the SSR box (mm).
+    double z_ssr_offset_mm = 2;
+    // Tangential width of the rear face of the SSR enclosure (mm).
+    double w_ssr_mm = 3;
+    // Uniform radial depth of the flat side flanges of the SSR enclosure (mm).
+    double d_ssr_mm = 4;
+    // Vertical height of the SSR enclosure (mm).
+    double h_ssr_mm = 5;
+  }
+
+  // Geometry of the under-kiln reflector and multi-layer subfloor stack.
+  message FloorGeometry {
+    // Diameter of the circular polished stainless steel / Calsil floor reflector (mm).
+    double d_reflector_mm = 1;
+    // Total thickness of the circular floor reflector assembly (mm).
+    double t_reflector_calsil_mm = 2;
+    // Vertical air gap beneath the circular floor reflector formed by spacer feet (mm).
+    double g_floor_reflector_mm = 3;
+    // Side width of the square non-vinyl concrete/tile topping pad in the corner (mm).
+    double w_floor_pad_mm = 4;
+    // Thickness of the square concrete/tile topping pad above the screed datum z = 0 (mm).
+    double t_floor_pad_mm = 5;
+    // Thickness of the continuous fiber-reinforced structural screed layer (mm).
+    double t_screed_mm = 6;
+    // Thickness of the continuous Vacuum Insulation Panel (VIP) subfloor layer (mm).
+    double t_vip_mm = 7;
+  }
+
+  // Dimensions and placement of the overhead canopy extraction hood.
+  message HoodGeometry {
+    // Bottom circular capture opening diameter of the canopy hood (mm).
+    double d_hood_inlet_mm = 1;
+    // Top exhaust duct throat diameter of the canopy hood (mm).
+    double d_hood_duct_mm = 2;
+    // Vertical drop distance from the ceiling (z = h_wall) down to the hood rim (mm).
+    double z_hood_drop_mm = 3;
+    // X-coordinate of the vertical hood centerline axis from the back wall (mm).
+    double x_hood_mm = 4;
+    // Y-coordinate of the vertical hood centerline axis from the left wall (mm).
+    double y_hood_mm = 5;
+  }
+
+  // Master geometric specification combining all physical subsystems.
+  message Geometry {
+    ShieldGeometry shield = 1;
+    RoomGeometry room = 2;
+    KilnGeometry kiln = 3;
+    BungGeometry bung = 4;
+    SsrGeometry ssr = 5;
+    FloorGeometry floor = 6;
+    HoodGeometry hood = 7;
+  }
+
+  // Operating temperatures, thermal conductances, and active airflow sources.
+  message HeatSourcesAndFlows {
+    // Peak steady-state internal kiln firing chamber temperature (degrees Celsius).
+    double t_internal_c = 1;
+    // External outdoor / make-up ambient air temperature (degrees Celsius).
+    double t_ext_c = 2;
+    // Effective thermal transmittance of the cylindrical kiln wall (W/m^2*K).
+    double u_kiln_side = 3;
+    // Effective thermal transmittance of the insulated kiln lid (W/m^2*K).
+    double u_kiln_top = 4;
+    // Effective thermal transmittance of the insulated kiln floor slab (W/m^2*K).
+    double u_kiln_bot = 5;
+    // Sensible convective heat release rate exiting the open exhaust bung (W).
+    double q_bung_open_w = 6;
+    // Internal electrical Joule heat dissipation of the SSR heatsink (W).
+    double q_ssr_internal_w = 7;
+    // Active volumetric extraction flow rate of the overhead hood exhaust fan (CFM).
+    double exhaust_fan_cfm = 8;
+  }
+
+  // Thermal emissivities (dimensionless, 0.0 to 1.0) of all solid surfaces.
+  message SurfaceEmissivities {
+    // Emissivity of the stainless steel kiln outer jacket and lid band.
+    double eps_kiln = 1;
+    // Emissivity of the calcium silicate shield board (Promatect-H).
+    double eps_shield = 2;
+    // Emissivity of paper-faced Class A2 gypsum plasterboard.
+    double eps_gypsum = 3;
+    // Emissivity of bare aerated autoclaved concrete (AAC) blocks.
+    double eps_aac = 4;
+    // Hemispherical emissivity of the polished stainless steel reflector top face.
+    double eps_reflector_top = 5;
+    // Emissivity of the sheet-metal SSR electrical enclosure.
+    double eps_ssr = 6;
+  }
+
+  // Thermal conductivities (W/m*K) and envelope U-values (W/m^2*K).
+  message MaterialConductivities {
+    // Thermal conductivity of the calcium silicate shield and reflector backing (W/m*K).
+    double k_shield = 1;
+    // Thermal conductivity of standard gypsum plasterboard (W/m*K).
+    double k_gypsum = 2;
+    // Thermal conductivity of structural AAC blocks (W/m*K).
+    double k_aac = 3;
+    // Thermal conductivity of the concrete or porcelain tile floor topping pad (W/m*K).
+    double k_pad = 4;
+    // Thermal conductivity of the fiber-reinforced floor screed (W/m*K).
+    double k_screed = 5;
+    // Center-of-panel thermal conductivity of the subfloor VIP insulation (W/m*K).
+    double k_vip = 6;
+    // Overall thermal transmittance of the ceiling and roof assembly (W/m^2*K).
+    double u_roof = 7;
+    // Overall thermal transmittance of the double-glazed sliding door (W/m^2*K).
+    double u_glass_door = 8;
+  }
+
+  // Master thermal properties specification.
+  message ThermalProperties {
+    HeatSourcesAndFlows sources = 1;
+    SurfaceEmissivities emissivities = 2;
+    MaterialConductivities conductivities = 3;
+  }
+
+  // Spatial discretization parameters controlling patch resolution.
+  message Discretization {
+    // Horizontal grid patch width along the left and back walls (mm).
+    double dx_wall_mm = 1;
+    // Vertical grid patch height along the left and back walls (mm).
+    double dz_wall_mm = 2;
+    // Number of azimuthal circumferential divisions around the kiln cylinder.
+    int32 n_theta_kiln = 3;
+    // Number of vertical axial divisions along the kiln cylinder height.
+    int32 n_z_kiln = 4;
+  }
+
+  // Descriptive identifier for the simulation experiment.
+  string experiment_name = 1;
+  // Physical geometry of the kiln, shields, floor, hood, and room.
+  Geometry geometry = 2;
+  // Thermal boundary conditions, emissivities, and material conductivities.
+  ThermalProperties thermal = 3;
+  // Spatial mesh discretization settings.
+  Discretization grid = 4;
+}
+
+// Top-level output record encapsulating provenance, input snapshot, derived
+// geometry, safety metrics, and spatially resolved patch states.
+message SimulationOutput {
+  // Execution metadata and cryptographic hash linking output to input config.
+  message Provenance {
+    // Path to the input .textproto configuration file supplied at runtime.
+    string input_config_path = 1;
+    // Hexadecimal MD5 digest of the exact raw bytes of the input config file.
+    string input_config_md5 = 2;
+    // ISO-8601 UTC timestamp when the simulation completed.
+    string timestamp_utc = 3;
+    // Total wall-clock execution time of the solver in seconds.
+    double solver_wall_time_s = 4;
+    // True if both inner surface energy balance and middle room loop converged.
+    bool converged = 5;
+    // Maximum absolute energy balance residual across all patches (W/m^2).
+    double max_energy_residual_w_m2 = 6;
+  }
+
+  // Geometric and thermal quantities computed deterministically from input config.
+  message DerivedParameters {
+    // Vertical height of the calcium silicate shield panels (mm).
+    double h_shield_mm = 1;
+    // Elevation of the top surface of the concrete/tile floor pad (mm).
+    double z_pad_top_mm = 2;
+    // Elevation of the underside of the circular floor reflector (mm).
+    double z_reflector_bot_mm = 3;
+    // Elevation of the top specular surface of the circular floor reflector (mm).
+    double z_reflector_top_mm = 4;
+    // Elevation of the underside of the kiln drum bottom plate (mm).
+    double z_drum_bot_mm = 5;
+    // Total vertical height of the cylindrical kiln drum plus closed lid (mm).
+    double h_kiln_total_mm = 6;
+    // Elevation of the top flat surface of the closed kiln lid (mm).
+    double z_kiln_top_mm = 7;
+    // Elevation of the bottom louver face of the SSR enclosure (mm).
+    double z_ssr_bot_mm = 8;
+    // Elevation of the top face of the SSR enclosure (mm).
+    double z_ssr_top_mm = 9;
+    // Elevation of the open top rim of the exhaust dilution cup (mm).
+    double z_bung_mm = 10;
+    // Elevation of the virtual mirror plane of the kiln base in the reflector (mm).
+    double z_mirror_mm = 11;
+    // Elevation of the lower capture rim of the overhead canopy hood (mm).
+    double z_hood_inlet_mm = 12;
+    // Effective hydraulic gap depth of the behind-shield chimney channel (mm).
+    double d_chimney_eff_mm = 13;
+    // Unshielded 1D thermal transmittance of the structural AAC wall (W/m^2*K).
+    double u_aac_wall = 14;
+  }
+
+  // Key engineering evaluation metrics and safety pass/fail flags.
+  message SafetyMetrics {
+    // Peak surface temperature on exposed Class A2 gypsum on the left wall (C).
+    double t_gypsum_max_left_c = 1;
+    // Peak surface temperature on exposed Class A2 gypsum on the back wall (C).
+    double t_gypsum_max_back_c = 2;
+    // True if all exposed gypsum remains strictly below 40.0 C.
+    bool gypsum_safe = 3;
+    // Internal air temperature surrounding the relay inside the SSR box (C).
+    double t_ssr_air_c = 4;
+    // Area-averaged external sheet-metal casing temperature of the SSR box (C).
+    double t_ssr_case_c = 5;
+    // True if t_ssr_air_c < 35.0 C and t_ssr_case_c < 45.0 C.
+    bool ssr_safe = 6;
+    // Temperature at the top barrier film of the VIP directly under the reflector (C).
+    double t_vip_under_reflector_c = 7;
+    // Peak temperature of the concrete/tile pad just outside the reflector rim (C).
+    double t_floor_pad_edge_c = 8;
+    // Peak temperature of the vinyl flooring just outside the square floor pad (C).
+    double t_vinyl_edge_c = 9;
+    // True if both under-reflector and outside-reflector floor zones are safe.
+    bool floor_safe = 10;
+    // Peak front-face temperature on the calcium silicate shield boards (C).
+    double t_shield_max_c = 11;
+    // Peak front-face temperature on the AAC block behind the shield (C).
+    double t_aac_max_c = 12;
+    // Maximum upward air velocity inside the behind-shield chimney gap (m/s).
+    double v_chimney_max_m_s = 13;
+    // Maximum exit air temperature discharging from the top of the chimney gap (C).
+    double t_chimney_exit_max_c = 14;
+    // True if the hood captures 100% of the primary kiln plume volume and width.
+    bool plume_fully_captured = 15;
+    // Fraction of primary kiln plume mass flow captured by the hood (0.0 to 1.0).
+    double plume_capture_fraction = 16;
+    // Fraction of behind-shield chimney exit flow captured by the hood (0.0 to 1.0).
+    double chimney_capture_fraction = 17;
+    // Steady-state temperature of the upper stratified room gas layer (C).
+    double t_room_upper_c = 18;
+    // Steady-state temperature of the lower make-up room air layer (C).
+    double t_room_lower_c = 19;
+    // Height of the two-zone thermal stratification interface above z = 0 (mm).
+    double z_stratification_layer_mm = 20;
+    // Circumferential peak-to-minimum skin temperature difference around kiln (C).
+    double delta_t_kiln_skin_c = 21;
+    // Temperature of the concrete/tile pad directly under the reflector center (C).
+    double t_floor_pad_under_reflector_c = 22;
+    // True if the VIP directly under the reflector remains strictly below 50.0 C.
+    bool floor_under_reflector_safe = 23;
+    // Peak temperature of the VIP outside the reflector rim under the pad edge (C).
+    double t_vip_outside_reflector_c = 24;
+    // True if t_vip_outside_reflector_c < 50.0 C and t_vinyl_edge_c < 45.0 C.
+    bool floor_outside_reflector_safe = 25;
+    // Peak surface temperature on the overhead ceiling at z = h_wall (C).
+    double t_ceiling_max_c = 26;
+    // True if the peak ceiling surface temperature remains strictly below 40.0 C.
+    bool ceiling_safe = 27;
+  }
+
+  // Resolved thermal state of an individual discretized surface patch.
+  message PatchState {
+    int32 patch_id = 1;
+    SurfaceType surface_type = 2;
+    double x_m = 3;
+    double y_m = 4;
+    double z_m = 5;
+    double nx = 6;
+    double ny = 7;
+    double nz = 8;
+    double area_m2 = 9;
+    double temp_front_c = 10;
+    double temp_back_c = 11;
+    double q_rad_net_w_m2 = 12;
+    double q_conv_net_w_m2 = 13;
+  }
+
+  Provenance provenance = 1;
+  SimulationConfig input_config_snapshot = 2;
+  DerivedParameters derived = 3;
+  SafetyMetrics metrics = 4;
+  repeated PatchState patches = 5;
+}

@@ -1,0 +1,10 @@
+bazel-bin/
+bazel-kilnsim/
+bazel-out/
+bazel-testlogs/
+#*
+*~
+*.lock
+results/
+sweep_results/
+sweep_configs/

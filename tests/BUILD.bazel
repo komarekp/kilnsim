@@ -1,0 +1,80 @@
+"""Unit and integration test targets for kiln_thermal_sim."""
+
+load("@rules_python//python:defs.bzl", "py_test")
+
+package(default_visibility = ["//visibility:private"])
+
+py_test(
+    name = "params_test",
+    size = "small",
+    srcs = ["params_test.py"],
+    data = ["//:configs"],
+    deps = [
+        "//proto:kiln_sim_py_pb2",
+        "//src:io_manager",
+        "//src:params",
+    ],
+)
+
+py_test(
+    name = "mesh_test",
+    size = "small",
+    srcs = ["mesh_test.py"],
+    data = ["//:configs"],
+    deps = [
+        "//src:io_manager",
+        "//src:mesh",
+        "//src:params",
+    ],
+)
+
+py_test(
+    name = "view_factors_test",
+    size = "medium",
+    srcs = ["view_factors_test.py"],
+    data = ["//:configs"],
+    deps = [
+        "//src:io_manager",
+        "//src:mesh",
+        "//src:params",
+        "//src:view_factors",
+    ],
+)
+
+py_test(
+    name = "chimney_test",
+    size = "small",
+    srcs = ["chimney_test.py"],
+    data = ["//:configs"],
+    deps = [
+        "//src:chimney",
+        "//src:io_manager",
+        "//src:mesh",
+        "//src:params",
+    ],
+)
+
+py_test(
+    name = "solver_test",
+    size = "medium",
+    srcs = ["solver_test.py"],
+    data = ["//:configs"],
+    deps = [
+        "//src:io_manager",
+        "//src:mesh",
+        "//src:metrics",
+        "//src:params",
+        "//src:solver",
+        "//src:view_factors",
+    ],
+)
+
+py_test(
+    name = "run_sweep_test",
+    size = "medium",
+    srcs = ["run_sweep_test.py"],
+    deps = [
+        "//:run_sweep_lib",
+        "//src:io_manager",
+    ],
+)

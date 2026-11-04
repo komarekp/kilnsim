@@ -1,0 +1,113 @@
+"""Build targets for the kiln_sim application and physics libraries."""
+
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "params",
+    srcs = ["params.py"],
+    deps = [
+        "//proto:kiln_sim_py_pb2",
+    ],
+)
+
+py_library(
+    name = "io_manager",
+    srcs = ["io_manager.py"],
+    deps = [
+        "//proto:kiln_sim_py_pb2",
+    ],
+)
+
+py_library(
+    name = "mesh",
+    srcs = ["mesh.py"],
+    deps = [
+        ":params",
+        "//proto:kiln_sim_py_pb2",
+    ],
+)
+
+py_library(
+    name = "view_factors",
+    srcs = ["view_factors.py"],
+    deps = [
+        ":mesh",
+        ":params",
+    ],
+)
+
+py_library(
+    name = "chimney",
+    srcs = ["chimney.py"],
+    deps = [
+        ":mesh",
+        ":params",
+    ],
+)
+
+py_library(
+    name = "plume_room",
+    srcs = ["plume_room.py"],
+    deps = [
+        ":chimney",
+        ":mesh",
+        ":params",
+    ],
+)
+
+py_library(
+    name = "solver",
+    srcs = ["solver.py"],
+    deps = [
+        ":chimney",
+        ":mesh",
+        ":params",
+        ":plume_room",
+        ":view_factors",
+    ],
+)
+
+py_library(
+    name = "metrics",
+    srcs = ["metrics.py"],
+    deps = [
+        ":chimney",
+        ":mesh",
+        ":params",
+        ":plume_room",
+        ":solver",
+        ":view_factors",
+        "//proto:kiln_sim_py_pb2",
+    ],
+)
+
+py_library(
+    name = "kiln_sim_lib",
+    srcs = ["__init__.py"],
+    deps = [
+        ":chimney",
+        ":io_manager",
+        ":mesh",
+        ":metrics",
+        ":params",
+        ":plume_room",
+        ":solver",
+        ":view_factors",
+    ],
+)
+
+py_binary(
+    name = "main",
+    srcs = ["main.py"],
+    deps = [
+        ":io_manager",
+        ":mesh",
+        ":metrics",
+        ":params",
+        ":solver",
+        ":view_factors",
+        "//proto:kiln_sim_py_pb2",
+    ],
+)

@@ -1,0 +1,113 @@
+# proto-file: proto/kiln_sim.proto
+# proto-message: kiln_sim.SimulationConfig
+
+experiment_name: "standoff200_pad1400x0_refl900_calsil10_gap20_hood600_door800_cfm350"
+
+geometry {
+  shield {
+    w_shield_left_mm: 1200.0
+    w_shield_back_mm: 1200.0
+    g_floor_mm: 0.0
+    g_ceil_mm: 0.0
+    t_shield_mm: 12.5
+  }
+
+  room {
+    h_wall_mm: 2345.0
+    t_gypsum_mm: 12.5
+    t_aac_mm: 215.0
+    l_room_mm: 3530.0
+    w_room_mm: 2770.0
+    w_glass_door_mm: 2000.0
+    w_door_open_mm: 800.0
+    h_door_mm: 2100.0
+
+    chimney {
+      d_chimney_mm: 0.0
+      chimney_blockage_fraction: 0.08
+      seal_chimney_sides: true
+    }
+  }
+
+  kiln {
+    s_kiln_left_mm: 200.0
+    s_kiln_back_mm: 200.0
+    d_kiln_mm: 700.0
+    h_drum_mm: 580.0
+    t_lid_mm: 105.0
+    h_kiln_base_mm: 210.0
+  }
+
+  bung {
+    bung_angle_deg: 0.0
+    r_bung_mm: 415.0
+    z_bung_offset_mm: 540.0
+    bung_captured: true
+  }
+
+  ssr {
+    ssr_angle_deg: -45.0
+    z_ssr_offset_mm: 100.0
+    w_ssr_mm: 190.0
+    d_ssr_mm: 146.5
+    h_ssr_mm: 430.0
+  }
+
+  floor {
+    d_reflector_mm: 900.0
+    t_reflector_calsil_mm: 10.0
+    g_floor_reflector_mm: 20.0
+    w_floor_pad_mm: 1400.0
+    t_floor_pad_mm: 0.0
+    t_screed_mm: 40.0
+    t_vip_mm: 20.0
+  }
+
+  hood {
+    d_hood_inlet_mm: 600.0
+    d_hood_duct_mm: 150.0
+    z_hood_drop_mm: 400.0
+    x_hood_mm: 562.5
+    y_hood_mm: 562.5
+  }
+}
+
+thermal {
+  sources {
+    t_internal_c: 1280.0
+    t_ext_c: 20.0
+    u_kiln_side: 0.80
+    u_kiln_top: 2.00
+    u_kiln_bot: 2.00
+    q_bung_open_w: 110.0
+    q_ssr_internal_w: 18.8
+    exhaust_fan_cfm: 350.0
+  }
+
+  emissivities {
+    eps_kiln: 0.60
+    eps_shield: 0.90
+    eps_gypsum: 0.90
+    eps_aac: 0.88
+    eps_reflector_top: 0.15
+    eps_ssr: 0.60
+  }
+
+  conductivities {
+    k_shield: 0.175
+    k_gypsum: 0.24
+    k_aac: 0.13
+    k_pad: 1.40
+    k_screed: 1.20
+    k_vip: 0.007
+    u_roof: 0.18
+    u_glass_door: 1.40
+  }
+}
+
+grid {
+  dx_wall_mm: 50.0
+  dz_wall_mm: 50.0
+  n_theta_kiln: 24
+  n_z_kiln: 6
+}

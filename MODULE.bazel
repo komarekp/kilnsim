@@ -1,0 +1,10 @@
+"""Bazel module definition for the kiln thermal and airflow simulator."""
+
+module(
+    name = "kiln_thermal_sim",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "rules_proto", version = "6.0.2")
+bazel_dep(name = "rules_python", version = "0.34.0")
+bazel_dep(name = "protobuf", version = "27.2")

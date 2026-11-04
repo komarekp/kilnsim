@@ -1,0 +1,16 @@
+"""Build targets for Protocol Buffer schemas."""
+
+load("@protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "kiln_sim_proto",
+    srcs = ["kiln_sim.proto"],
+)
+
+py_proto_library(
+    name = "kiln_sim_py_pb2",
+    deps = [":kiln_sim_proto"],
+)

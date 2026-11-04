@@ -1,0 +1,36 @@
+"""Root BUILD file for kiln_thermal_sim."""
+
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "README.md",
+])
+
+filegroup(
+    name = "configs",
+    srcs = glob(["configs/*.textproto"]),
+)
+
+py_library(
+    name = "run_sweep_lib",
+    srcs = ["run_sweep.py"],
+    deps = [
+        "//proto:kiln_sim_py_pb2",
+        "//src:io_manager",
+        "//src:mesh",
+        "//src:metrics",
+        "//src:params",
+        "//src:solver",
+        "//src:view_factors",
+    ],
+)
+
+py_binary(
+    name = "run_sweep",
+    srcs = ["run_sweep.py"],
+    deps = [
+        ":run_sweep_lib",
+    ],
+)

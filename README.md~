@@ -1,0 +1,100 @@
+# Rohde Ecotop 60 Corner Thermal & Airflow Simulator (`kiln_thermal_sim`)
+
+A coupled steady-state radiative, convective, conductive, and buoyant-plume
+simulation tool for evaluating heat shield dimensions, floor insulation stacks,
+and ventilation requirements for a cylindrical top-loading ceramics kiln
+installed in a masonry corner.
+
+---
+
+## 1. System Requirements & Debian Package Dependencies
+
+This project is designed for Debian Linux and relies exclusively on packages
+from the standard Debian `main` archive (`apt`). Installing Python packages via
+`pip` / PyPI is intentionally avoided.
+
+Install all runtime, build, and test dependencies via `apt`:
+
+```bash
+sudo apt update && sudo apt install -y \
+    python3 \
+    python3-absl \
+    python3-numpy \
+    python3-scipy \
+    python3-protobuf \
+    protobuf-compiler \
+    python3-pytest \
+    bazel \
+    elpa-protobuf-mode
+```
+
+To ensure Bazel uses the system Python 3 interpreter and resolves Debian's
+`/usr/lib/python3/dist-packages`, include the following `.bazelrc` in the
+workspace root:
+
+```text
+build --action_env=PATH="/usr/bin:/bin"
+build --action_env=PYTHONPATH="/usr/lib/python3/dist-packages"
+test --test_env=PYTHONPATH="/usr/lib/python3/dist-packages"
+```
+
+---
+
+## 2. Coding Standards & Architectural Rules
+
+All contributions and modules in this repository adhere to the following rules:
+
+1. **Google Python Style Guide**: All Python source and test files follow the
+   [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html),
+   including 2-space indentation, `CapWords` class names, `lower_with_under`
+   function and variable names, module-level docstrings, `Args:` / `Returns:` /
+   `Raises:` docstring blocks, and PEP 484 type annotations.
+2. **Protocol Buffers Style Guide**: All `.proto` definitions follow the
+   [Google Protobuf Style Guide](https://protobuf.dev/programming-guides/style/),
+   using `CamelCase` message and enum names, `lower_snake_case` field names, and
+   `CAPITALS_WITH_UNDERSCORES` enum values prefixed with the enum type name.
+   All input submessages are nested inside `SimulationConfig`, and all output
+   submessages are nested inside `SimulationOutput`.
+3. **Abseil Python Application Structure**: Executables use `absl.app.run()`,
+   `absl.flags` for command-line flag parsing, and `absl.logging` for structured
+   diagnostic output. Unit tests use `absl.testing.absltest`.
+4. **Explicit Enum Value Assignment**: Every `enum` in both `.proto` files and
+   Python `enum.IntEnum` classes must assign integer values manually (never
+   using `enum.auto()`), starting with `UNSPECIFIED = 0`.
+5. **Single-Run Scope**: The core simulator executes a single deterministic
+   configuration per invocation. Parametric sweeps belong in external scripts.
+6. **Immutable Inputs & Cryptographic Provenance**: Input `.textproto` files are
+   never modified by the simulator. Upon loading, the simulator computes the
+   raw-byte `md5sum` of the input file and embeds both the hexadecimal MD5
+   digest and a full `input_config_snapshot` inside the timestamped
+   `SimulationOutput` `.out.textproto` file.
+7. **Ergonomic Single-Patch Inspection**: While vectorized solver kernels use
+   contiguous `numpy.ndarray` Structure-of-Arrays (SoA) fields on `SurfaceMesh`,
+   inspection and debugging code should use `SurfaceMesh.get_patch()`,
+   `SurfaceMesh.get_patches_by_type()`, and `SurfaceMesh.find_patch_at_coord()`
+   to obtain self-contained `PatchView` objects.
+
+---
+
+## 3. Building, Testing, and Running with Bazel
+
+### Run All Unit Tests
+
+```bash
+bazel test //tests:all
+```
+
+### Execute a Single Simulation Run
+
+```bash
+bazel run //src/kiln_sim:main -- \
+    --config="$(pwd)/configs/baseline_205mm.textproto" \
+    --output_dir="$(pwd)/results"
+```
+
+### Verify Input Provenance Against Output Record
+
+```bash
+md5sum configs/baseline_205mm.textproto
+grep "input_config_md5" results/baseline_205mm_*.out.textproto
+```
