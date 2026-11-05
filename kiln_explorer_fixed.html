@@ -1,0 +1,1120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rohde Ecotop 60 — Corner Thermal Explorer</title>
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --panel: #ffffff;
+      --text: #1f242b;
+      --muted: #5e6773;
+      --border: #d8dde3;
+      --accent: #006ab1;
+      --safe: #2ea043;
+      --danger: #d93025;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    header {
+      background: #1b222c;
+      color: #ffffff;
+      padding: 12px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 3px solid var(--accent);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+    header .subtitle {
+      font-size: 0.82rem;
+      color: #b8c2cc;
+      margin-top: 2px;
+    }
+    .csv-loader {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.8rem;
+      background: #2b3543;
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid #414f62;
+    }
+    .csv-loader input[type="file"] {
+      font-size: 0.78rem;
+      color: #d8dde3;
+    }
+    .status-pill {
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 0.75rem;
+      background: #2ea043;
+      color: #fff;
+    }
+    .controls-bar {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 12px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .control-group label {
+      font-size: 0.76rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+    }
+    .control-group label span.val {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .btn-group {
+      display: flex;
+      gap: 4px;
+    }
+    .btn-group button {
+      flex: 1;
+      padding: 6px 4px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: #f8f9fa;
+      color: var(--text);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+    .btn-group button:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: #eef6fc;
+    }
+    .btn-group button.active {
+      background: var(--accent);
+      color: #ffffff;
+      border-color: var(--accent);
+    }
+    .btn-group button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 16px;
+      padding: 16px 20px;
+      flex: 1;
+    }
+    @media (max-width: 1024px) {
+      .main-layout { grid-template-columns: 1fr; }
+    }
+    .canvas-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    }
+    .canvas-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.84rem;
+      background: #fafbfc;
+    }
+    .drag-hint {
+      color: var(--accent);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .svg-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      background: #ffffff;
+      user-select: none;
+    }
+    svg#elevation-svg {
+      width: 100%;
+      height: auto;
+      max-height: 74vh;
+      border: 1px solid #eef0f2;
+      border-radius: 4px;
+    }
+    .draggable-kiln {
+      cursor: ew-resize;
+    }
+    .draggable-kiln.plan-drag {
+      cursor: move;
+    }
+    .draggable-kiln:hover .kiln-outline {
+      stroke: #006ab1;
+      stroke-width: 3px;
+    }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    }
+    .card h2 {
+      margin: 0 0 10px 0;
+      font-size: 0.92rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      border-bottom: 1px solid #edf0f3;
+      padding-bottom: 6px;
+    }
+    .metric-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 0.83rem;
+    }
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+      border-bottom: 1px dashed #eef0f2;
+    }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-name { font-weight: 500; }
+    .metric-limit { font-size: 0.73rem; color: var(--muted); }
+    .metric-badge {
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      color: #fff;
+      background: #111;
+      border: 2px solid var(--safe);
+    }
+    .metric-badge.unsafe {
+      border-color: var(--danger);
+      background: #2b0908;
+    }
+    .legend-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 0.78rem;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .swatch {
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.25);
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Rohde Ecotop 60 — Studio Corner Thermal Explorer</h1>
+    <div class="subtitle" id="header-subtitle">Interactive diagnostic views of the physical and thermal simulation geometry</div>
+  </div>
+  <div class="csv-loader">
+    <span id="data-status" class="status-pill">3,456 Sweep States Ready</span>
+    <label for="csv-file-input" style="cursor:pointer; font-weight:600;">Load CSV:</label>
+    <input type="file" id="csv-file-input" accept=".csv">
+  </div>
+</header>
+
+<section class="controls-bar">
+  <div class="control-group" style="grid-column: span 2;">
+    <label>Active View</label>
+    <div class="btn-group" id="ctrl-view">
+      <button data-val="side">Right Elev (Left Wall)</button>
+      <button data-val="front">Front Elev (Back Wall)</button>
+      <button data-val="plan" class="active">Plan View (Top-Down)</button>
+    </div>
+  </div>
+
+  <div class="control-group">
+    <label>Kiln Wall Standoff <span class="val" id="lbl-skiln">200 mm</span></label>
+    <div class="btn-group" id="ctrl-skiln">
+      <button class="active" data-val="200">200 mm</button>
+      <button data-val="300">300 mm</button>
+    </div>
+  </div>
+
+  <div class="control-group">
+    <label>Exhaust Fan Flow <span class="val" id="lbl-fan">0 CFM</span></label>
+    <div class="btn-group" id="ctrl-fan">
+      <button class="active" data-val="0">Off (0)</button>
+      <button data-val="350">350</button>
+      <button data-val="400">400</button>
+      <button data-val="450">450</button>
+    </div>
+  </div>
+
+  <div class="control-group">
+    <label>Canopy Hood Width <span class="val" id="lbl-hood">600 mm</span></label>
+    <div class="btn-group" id="ctrl-hood">
+      <button class="active" data-val="600">600</button>
+      <button data-val="700">700</button>
+      <button data-val="800">800</button>
+    </div>
+  </div>
+
+  <div class="control-group">
+    <label>Reflector Diameter <span class="val" id="lbl-dref">700 mm</span></label>
+    <div class="btn-group" id="ctrl-dref">
+      <button class="active" data-val="700">700</button>
+      <button data-val="800">800</button>
+      <button data-val="900">900</button>
+      <button data-val="1000">1000</button>
+    </div>
+  </div>
+
+  <div class="control-group">
+    <label>Reflector Air Gap <span class="val" id="lbl-gref">0 mm</span></label>
+    <div class="btn-group" id="ctrl-gref">
+      <button class="active" data-val="0">0 mm</button>
+      <button data-val="5">5 mm</button>
+      <button data-val="10">10 mm</button>
+      <button data-val="20">20 mm</button>
+    </div>
+  </div>
+
+  <div class="control-group">
+    <label>Reflector Calsil <span class="val" id="lbl-tref">0 mm</span></label>
+    <div class="btn-group" id="ctrl-tref">
+      <button class="active" data-val="0">0 (Pan)</button>
+      <button data-val="10">10 mm</button>
+    </div>
+  </div>
+
+  <div class="control-group">
+    <label>Floor Pad Width <span class="val" id="lbl-wpad">1200 mm</span></label>
+    <div class="btn-group" id="ctrl-wpad">
+      <button class="active" data-val="1200">1200 mm</button>
+      <button data-val="1400">1400 mm</button>
+    </div>
+  </div>
+
+  <div class="control-group">
+    <label>Door Open Width <span class="val" id="lbl-door">0 mm</span></label>
+    <div class="btn-group" id="ctrl-door">
+      <button class="active" data-val="0">0 mm</button>
+      <button data-val="150">150 mm</button>
+      <button data-val="800">800 mm</button>
+    </div>
+  </div>
+</section>
+
+<div class="main-layout">
+  <div class="canvas-card">
+    <div class="canvas-header">
+      <div class="drag-hint" id="drag-hint-msg">↔ Drag the kiln to toggle between 200 mm and 300 mm wall standoffs</div>
+      <div id="plume-summary" style="font-weight:600;">Plume Capture: 100.0%</div>
+    </div>
+    <div class="svg-container">
+      <svg id="elevation-svg" viewBox="0 0 1120 1440" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="card">
+      <h2>Safety Thresholds &amp; Sensors</h2>
+      <div class="metric-list" id="metric-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Material Color Key</h2>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="swatch" style="background:linear-gradient(135deg,#b8bec6,#e6e9ed);"></span>Kiln &amp; Reflector (SS)</div>
+        <div class="legend-item"><span class="swatch" style="background:#006ab1;"></span>Kiln Stand</div>
+        <div class="legend-item"><span class="swatch" style="background:#4a4f55;"></span>Calsil Shield</div>
+        <div class="legend-item"><span class="swatch" style="background:linear-gradient(135deg,#3f9e93,#8fd3c8);"></span>Exhaust Hood</div>
+        <div class="legend-item"><span class="swatch" style="background:#b9a6cc;"></span>AAC Block Wall</div>
+        <div class="legend-item"><span class="swatch" style="background:#f4efe0;"></span>Gypsum / Ceiling</div>
+        <div class="legend-item"><span class="swatch" style="background:#e8dcc4;"></span>Floor Pad (Firebrick)</div>
+        <div class="legend-item"><span class="swatch" style="background:#f3d55b;"></span>Vinyl Floor</div>
+        <div class="legend-item"><span class="swatch" style="background:#8c9298;"></span>Screed (Concrete)</div>
+        <div class="legend-item"><span class="swatch" style="background:#b02a37;"></span>VIP Insulation</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+// Fixed geometric constants
+const GEOM = {
+  h_wall: 2345,
+  t_aac: 215,
+  t_gypsum: 12.5,
+  t_shield: 12.5,   // same as gypsum thickness
+  d_chimney: 0,     // no chimney gap
+  w_shield_left: 1200,
+  w_shield_back: 1200,
+  d_kiln: 700,
+  r_kiln: 350,
+  h_drum: 580,
+  t_lid: 105,
+  h_kiln_base: 210,
+  z_ssr_offset: 100,
+  w_ssr: 190,
+  d_ssr: 146.5,
+  h_ssr: 430,
+  z_hood_drop: 400,
+  d_hood_duct: 150,
+  t_screed: 30,
+  t_vip: 20
+};
+
+// Safety limits (C)
+const LIMITS = {
+  gypsum: 40.0,
+  ceiling: 40.0,
+  ssr_air: 35.0,
+  ssr_case: 45.0,
+  vip: 50.0,
+  vinyl: 45.0
+};
+
+// Baseline CSV Data Extraction
+const BASE_GEOM_TABLE = {
+  "200|700|0|0":   { gypL:30.9, gypB:30.8, ssrA:31.2, ssrC:27.2, vipU:48.9, padU:49.4, padE:61.3, vipO:60.7, vin12:30.7, vin14:29.4, shd:46.8, aac:45.6, ceil:29.7, rUp:21.5, rLo:19.0, zSt:1993 },
+  "200|700|0|5":   { gypL:31.1, gypB:31.0, ssrA:31.7, ssrC:27.7, vipU:35.0, padU:35.3, padE:61.2, vipO:60.7, vin12:30.8, vin14:29.4, shd:47.1, aac:45.9, ceil:29.8, rUp:21.6, rLo:19.0, zSt:1993 },
+  "200|700|0|10":  { gypL:31.2, gypB:31.0, ssrA:31.7, ssrC:27.7, vipU:29.6, padU:29.8, padE:61.0, vipO:60.5, vin12:30.8, vin14:29.4, shd:47.2, aac:46.0, ceil:29.8, rUp:21.6, rLo:19.0, zSt:1993 },
+  "200|700|0|20":  { gypL:31.2, gypB:31.0, ssrA:31.7, ssrC:27.7, vipU:29.6, padU:29.8, padE:60.6, vipO:60.1, vin12:30.8, vin14:29.4, shd:47.2, aac:46.0, ceil:29.8, rUp:21.6, rLo:19.0, zSt:1993 },
+  "200|700|10|10": { gypL:31.2, gypB:31.0, ssrA:31.8, ssrC:27.8, vipU:24.6, padU:24.7, padE:60.6, vipO:60.1, vin12:30.8, vin14:29.4, shd:47.3, aac:46.1, ceil:29.9, rUp:21.7, rLo:19.0, zSt:1993 },
+  "200|700|10|20": { gypL:31.2, gypB:31.0, ssrA:31.8, ssrC:27.8, vipU:24.6, padU:24.7, padE:60.2, vipO:59.7, vin12:30.8, vin14:29.4, shd:47.3, aac:46.1, ceil:29.9, rUp:21.7, rLo:19.0, zSt:1993 },
+
+  "200|800|0|0":   { gypL:33.1, gypB:33.0, ssrA:33.4, ssrC:29.6, vipU:48.9, padU:49.4, padE:55.1, vipO:54.6, vin12:32.3, vin14:30.8, shd:49.3, aac:48.1, ceil:31.6, rUp:22.7, rLo:20.4, zSt:1993 },
+  "200|800|0|5":   { gypL:33.3, gypB:33.2, ssrA:33.9, ssrC:30.1, vipU:35.1, padU:35.4, padE:54.6, vipO:54.1, vin12:32.6, vin14:31.0, shd:49.6, aac:48.4, ceil:31.8, rUp:22.9, rLo:20.4, zSt:1993 },
+  "200|800|0|10":  { gypL:33.4, gypB:33.2, ssrA:33.9, ssrC:30.1, vipU:29.7, padU:29.9, padE:53.6, vipO:53.1, vin12:32.6, vin14:31.0, shd:49.7, aac:48.5, ceil:31.8, rUp:22.9, rLo:20.4, zSt:1993 },
+  "200|800|0|20":  { gypL:33.4, gypB:33.2, ssrA:33.9, ssrC:30.1, vipU:29.7, padU:29.9, padE:52.1, vipO:51.7, vin12:32.6, vin14:31.0, shd:49.7, aac:48.5, ceil:31.8, rUp:22.9, rLo:20.4, zSt:1993 },
+  "200|800|10|10": { gypL:33.4, gypB:33.3, ssrA:34.0, ssrC:30.2, vipU:24.7, padU:24.8, padE:52.1, vipO:51.7, vin12:32.6, vin14:31.0, shd:49.8, aac:48.6, ceil:31.8, rUp:22.9, rLo:20.4, zSt:1993 },
+  "200|800|10|20": { gypL:33.4, gypB:33.3, ssrA:34.0, ssrC:30.2, vipU:24.7, padU:24.8, padE:50.9, vipO:50.5, vin12:32.6, vin14:31.0, shd:49.8, aac:48.6, ceil:31.8, rUp:22.9, rLo:20.4, zSt:1993 },
+
+  "200|900|0|0":   { gypL:33.2, gypB:33.1, ssrA:33.3, ssrC:29.7, vipU:48.9, padU:49.4, padE:51.3, vipO:50.9, vin12:32.4, vin14:30.9, shd:49.8, aac:48.5, ceil:31.7, rUp:22.8, rLo:20.4, zSt:1993 },
+  "200|900|0|5":   { gypL:33.4, gypB:33.3, ssrA:33.8, ssrC:30.2, vipU:35.1, padU:35.4, padE:50.6, vipO:50.2, vin12:32.5, vin14:31.0, shd:50.1, aac:48.8, ceil:31.8, rUp:22.9, rLo:20.5, zSt:1993 },
+  "200|900|0|10":  { gypL:33.4, gypB:33.3, ssrA:33.8, ssrC:30.2, vipU:29.7, padU:29.9, padE:49.7, vipO:49.3, vin12:32.5, vin14:31.0, shd:50.1, aac:48.9, ceil:31.8, rUp:22.9, rLo:20.5, zSt:1993 },
+  "200|900|0|20":  { gypL:33.5, gypB:33.4, ssrA:33.8, ssrC:30.2, vipU:29.7, padU:29.9, padE:48.9, vipO:48.5, vin12:32.5, vin14:31.0, shd:50.2, aac:48.9, ceil:31.8, rUp:22.9, rLo:20.5, zSt:1993 },
+  "200|900|10|10": { gypL:33.5, gypB:33.4, ssrA:33.9, ssrC:30.3, vipU:24.7, padU:24.8, padE:48.9, vipO:48.5, vin12:32.6, vin14:31.0, shd:50.3, aac:49.0, ceil:31.9, rUp:23.0, rLo:20.5, zSt:1993 },
+  "200|900|10|20": { gypL:33.5, gypB:33.4, ssrA:33.9, ssrC:30.3, vipU:24.7, padU:24.8, padE:48.6, vipO:48.2, vin12:32.6, vin14:31.0, shd:50.3, aac:49.0, ceil:31.9, rUp:23.0, rLo:20.5, zSt:1993 },
+
+  "200|1000|0|0":   { gypL:34.7, gypB:34.6, ssrA:32.7, ssrC:29.2, vipU:48.9, padU:49.4, padE:49.0, vipO:48.6, vin12:32.5, vin14:31.0, shd:50.4, aac:49.1, ceil:31.7, rUp:22.9, rLo:20.5, zSt:1993 },
+  "200|1000|0|5":   { gypL:34.9, gypB:34.8, ssrA:33.2, ssrC:29.7, vipU:35.1, padU:35.4, padE:48.7, vipO:48.3, vin12:32.7, vin14:31.1, shd:50.7, aac:49.4, ceil:31.8, rUp:23.0, rLo:20.5, zSt:1993 },
+  "200|1000|0|10":  { gypL:34.9, gypB:34.8, ssrA:33.2, ssrC:29.7, vipU:29.7, padU:29.9, padE:48.6, vipO:48.2, vin12:32.7, vin14:31.1, shd:50.8, aac:49.5, ceil:31.8, rUp:23.0, rLo:20.5, zSt:1993 },
+  "200|1000|0|20":  { gypL:35.0, gypB:34.8, ssrA:33.2, ssrC:29.7, vipU:29.7, padU:29.9, padE:48.6, vipO:48.2, vin12:32.7, vin14:31.1, shd:50.8, aac:49.5, ceil:31.8, rUp:23.0, rLo:20.5, zSt:1993 },
+  "200|1000|10|10": { gypL:35.0, gypB:34.9, ssrA:33.3, ssrC:29.8, vipU:24.7, padU:24.8, padE:48.6, vipO:48.2, vin12:32.7, vin14:31.1, shd:50.9, aac:49.6, ceil:31.9, rUp:23.1, rLo:20.5, zSt:1993 },
+  "200|1000|10|20": { gypL:35.0, gypB:34.9, ssrA:33.3, ssrC:29.8, vipU:24.7, padU:24.8, padE:48.6, vipO:48.2, vin12:32.7, vin14:31.1, shd:50.9, aac:49.6, ceil:31.9, rUp:23.1, rLo:20.5, zSt:1993 },
+
+  "300|700|0|0":   { gypL:32.6, gypB:32.4, ssrA:32.8, ssrC:28.8, vipU:48.9, padU:49.4, padE:56.1, vipO:55.6, vin12:34.1, vin14:32.0, shd:48.3, aac:47.2, ceil:31.3, rUp:22.6, rLo:20.4, zSt:1993 },
+  "300|700|0|5":   { gypL:32.8, gypB:32.6, ssrA:33.3, ssrC:29.3, vipU:35.1, padU:35.4, padE:56.0, vipO:55.5, vin12:34.3, vin14:32.1, shd:48.6, aac:47.5, ceil:31.4, rUp:22.7, rLo:20.5, zSt:1993 },
+  "300|700|0|10":  { gypL:32.8, gypB:32.7, ssrA:33.3, ssrC:29.3, vipU:29.7, padU:29.9, padE:55.8, vipO:55.3, vin12:34.3, vin14:32.1, shd:48.7, aac:47.5, ceil:31.5, rUp:22.8, rLo:20.5, zSt:1993 },
+  "300|700|0|20":  { gypL:32.8, gypB:32.7, ssrA:33.3, ssrC:29.3, vipU:29.7, padU:29.9, padE:55.4, vipO:54.9, vin12:34.3, vin14:32.1, shd:48.7, aac:47.5, ceil:31.5, rUp:22.8, rLo:20.5, zSt:1993 },
+  "300|700|10|10": { gypL:32.9, gypB:32.7, ssrA:33.4, ssrC:29.4, vipU:24.7, padU:24.8, padE:55.4, vipO:54.9, vin12:34.3, vin14:32.1, shd:48.8, aac:47.6, ceil:31.5, rUp:22.8, rLo:20.5, zSt:1993 },
+  "300|700|10|20": { gypL:32.9, gypB:32.7, ssrA:33.4, ssrC:29.4, vipU:24.7, padU:24.8, padE:55.0, vipO:54.5, vin12:34.3, vin14:32.1, shd:48.8, aac:47.6, ceil:31.5, rUp:22.8, rLo:20.5, zSt:1993 },
+
+  "300|800|0|0":   { gypL:35.0, gypB:34.8, ssrA:33.5, ssrC:29.7, vipU:48.9, padU:49.4, padE:50.9, vipO:50.5, vin12:34.4, vin14:32.2, shd:51.2, aac:50.0, ceil:31.4, rUp:22.8, rLo:20.5, zSt:1993 },
+  "300|800|0|5":   { gypL:35.2, gypB:35.0, ssrA:34.0, ssrC:30.2, vipU:35.1, padU:35.4, padE:50.4, vipO:50.0, vin12:34.6, vin14:32.4, shd:51.5, aac:50.3, ceil:31.6, rUp:23.0, rLo:20.5, zSt:1993 },
+  "300|800|0|10":  { gypL:35.3, gypB:35.1, ssrA:34.0, ssrC:30.2, vipU:29.7, padU:29.9, padE:49.4, vipO:49.0, vin12:34.6, vin14:32.4, shd:51.6, aac:50.3, ceil:31.6, rUp:23.0, rLo:20.5, zSt:1993 },
+  "300|800|0|20":  { gypL:35.3, gypB:35.1, ssrA:34.0, ssrC:30.2, vipU:29.7, padU:29.9, padE:48.0, vipO:47.6, vin12:34.6, vin14:32.4, shd:51.6, aac:50.3, ceil:31.6, rUp:23.0, rLo:20.5, zSt:1993 },
+  "300|800|10|10": { gypL:35.3, gypB:35.1, ssrA:34.1, ssrC:30.3, vipU:24.7, padU:24.8, padE:48.0, vipO:47.6, vin12:34.6, vin14:32.4, shd:51.7, aac:50.4, ceil:31.6, rUp:23.0, rLo:20.5, zSt:1993 },
+  "300|800|10|20": { gypL:35.3, gypB:35.1, ssrA:34.1, ssrC:30.3, vipU:24.7, padU:24.8, padE:46.8, vipO:46.5, vin12:34.6, vin14:32.4, shd:51.7, aac:50.4, ceil:31.6, rUp:23.0, rLo:20.5, zSt:1993 },
+
+  "300|900|0|0":   { gypL:35.2, gypB:35.0, ssrA:33.5, ssrC:29.8, vipU:48.9, padU:49.4, padE:47.6, vipO:47.3, vin12:34.5, vin14:32.3, shd:52.1, aac:50.8, ceil:31.5, rUp:22.9, rLo:20.5, zSt:1993 },
+  "300|900|0|5":   { gypL:35.4, gypB:35.2, ssrA:34.0, ssrC:30.3, vipU:35.1, padU:35.4, padE:46.9, vipO:46.6, vin12:34.6, vin14:32.4, shd:52.4, aac:51.1, ceil:31.6, rUp:23.0, rLo:20.5, zSt:1993 },
+  "300|900|0|10":  { gypL:35.4, gypB:35.2, ssrA:34.0, ssrC:30.3, vipU:29.7, padU:29.9, padE:46.0, vipO:45.6, vin12:34.6, vin14:32.4, shd:52.5, aac:51.2, ceil:31.6, rUp:23.0, rLo:20.5, zSt:1993 },
+  "300|900|0|20":  { gypL:35.5, gypB:35.3, ssrA:34.0, ssrC:30.3, vipU:29.7, padU:29.9, padE:44.9, vipO:44.6, vin12:34.6, vin14:32.4, shd:52.5, aac:51.2, ceil:31.6, rUp:23.0, rLo:20.5, zSt:1993 },
+  "300|900|10|10": { gypL:35.5, gypB:35.3, ssrA:34.1, ssrC:30.4, vipU:24.7, padU:24.8, padE:44.9, vipO:44.6, vin12:34.7, vin14:32.5, shd:52.6, aac:51.3, ceil:31.7, rUp:23.1, rLo:20.5, zSt:1993 },
+  "300|900|10|20": { gypL:35.5, gypB:35.3, ssrA:34.1, ssrC:30.4, vipU:24.7, padU:24.8, padE:44.5, vipO:44.2, vin12:34.7, vin14:32.5, shd:52.6, aac:51.3, ceil:31.7, rUp:23.1, rLo:20.5, zSt:1993 },
+
+  "300|1000|0|0":   { gypL:37.0, gypB:36.8, ssrA:32.8, ssrC:29.2, vipU:48.9, padU:49.4, padE:45.4, vipO:45.1, vin12:34.6, vin14:32.4, shd:52.9, aac:51.6, ceil:31.4, rUp:22.9, rLo:20.5, zSt:1993 },
+  "300|1000|0|5":   { gypL:37.2, gypB:37.0, ssrA:33.3, ssrC:29.7, vipU:35.1, padU:35.4, padE:44.7, vipO:44.4, vin12:34.8, vin14:32.5, shd:53.3, aac:51.9, ceil:31.5, rUp:23.1, rLo:20.5, zSt:1993 },
+  "300|1000|0|10":  { gypL:37.2, gypB:37.0, ssrA:33.3, ssrC:29.7, vipU:29.7, padU:29.9, padE:44.4, vipO:44.1, vin12:34.8, vin14:32.5, shd:53.4, aac:52.0, ceil:31.5, rUp:23.1, rLo:20.5, zSt:1993 },
+  "300|1000|0|20":  { gypL:37.2, gypB:37.0, ssrA:33.3, ssrC:29.7, vipU:29.7, padU:29.9, padE:44.3, vipO:44.0, vin12:34.8, vin14:32.5, shd:53.4, aac:52.0, ceil:31.5, rUp:23.1, rLo:20.5, zSt:1993 },
+  "300|1000|10|10": { gypL:37.3, gypB:37.1, ssrA:33.4, ssrC:29.8, vipU:24.7, padU:24.8, padE:44.3, vipO:44.0, vin12:34.8, vin14:32.6, shd:53.5, aac:52.1, ceil:31.5, rUp:23.1, rLo:20.5, zSt:1993 },
+  "300|1000|10|20": { gypL:37.3, gypB:37.1, ssrA:33.4, ssrC:29.8, vipU:24.7, padU:24.8, padE:44.3, vipO:44.0, vin12:34.8, vin14:32.6, shd:53.5, aac:52.1, ceil:31.5, rUp:23.1, rLo:20.5, zSt:1993 }
+};
+
+let customCsvMap = null;
+const state = {
+  view: 'plan', // 'side', 'front', or 'plan'
+  s_kiln_mm: 200,
+  exhaust_fan_cfm: 0,
+  d_hood_inlet_mm: 600,
+  d_reflector_mm: 700,
+  g_floor_reflector_mm: 0,
+  t_reflector_calsil_mm: 0,
+  w_floor_pad_mm: 1200,
+  w_door_open_mm: 0
+};
+
+function enforceValidReflectorCombo(changedKey) {
+  if (state.t_reflector_calsil_mm === 10 && state.g_floor_reflector_mm < 10) {
+    if (changedKey === 'tref') {
+      state.g_floor_reflector_mm = 10;
+    } else {
+      state.t_reflector_calsil_mm = 0;
+    }
+  }
+}
+
+// Plume capture (%) and stratification height (mm) keyed by "door|fan|hood".
+// Means over the 96 sweep runs per combination in sweep_results.csv; the other
+// sweep parameters (standoff, pad, reflector) move these by < 0.2 % / < 10 mm.
+const PLUME_STRAT_TABLE = {
+  "0|0|600": { cap: 0.00, z: 1155.0, full: false },
+  "0|0|700": { cap: 0.00, z: 1155.0, full: false },
+  "0|0|800": { cap: 0.00, z: 1155.0, full: false },
+  "0|350|600": { cap: 85.46, z: 1155.0, full: false },
+  "0|350|700": { cap: 93.41, z: 1518.3, full: false },
+  "0|350|800": { cap: 93.41, z: 1518.3, full: false },
+  "0|400|600": { cap: 91.46, z: 1403.3, full: false },
+  "0|400|700": { cap: 100.00, z: 1993.3, full: true },
+  "0|400|800": { cap: 100.00, z: 1993.3, full: true },
+  "0|450|600": { cap: 91.46, z: 1403.2, full: false },
+  "0|450|700": { cap: 100.00, z: 1993.3, full: true },
+  "0|450|800": { cap: 100.00, z: 1993.3, full: true },
+  "150|0|600": { cap: 0.00, z: 1155.0, full: false },
+  "150|0|700": { cap: 0.00, z: 1155.0, full: false },
+  "150|0|800": { cap: 0.00, z: 1155.0, full: false },
+  "150|350|600": { cap: 85.48, z: 1851.9, full: false },
+  "150|350|700": { cap: 93.42, z: 1945.0, full: false },
+  "150|350|800": { cap: 93.42, z: 1945.0, full: false },
+  "150|400|600": { cap: 91.46, z: 1945.0, full: false },
+  "150|400|700": { cap: 100.00, z: 1993.3, full: true },
+  "150|400|800": { cap: 100.00, z: 1993.3, full: true },
+  "150|450|600": { cap: 91.46, z: 1945.0, full: false },
+  "150|450|700": { cap: 100.00, z: 1993.3, full: true },
+  "150|450|800": { cap: 100.00, z: 1993.3, full: true },
+  "800|0|600": { cap: 0.00, z: 1795.0, full: false },
+  "800|0|700": { cap: 0.00, z: 1795.0, full: false },
+  "800|0|800": { cap: 0.00, z: 1795.0, full: false },
+  "800|350|600": { cap: 85.47, z: 1945.0, full: false },
+  "800|350|700": { cap: 93.40, z: 1945.0, full: false },
+  "800|350|800": { cap: 93.40, z: 1945.0, full: false },
+  "800|400|600": { cap: 91.46, z: 1945.0, full: false },
+  "800|400|700": { cap: 100.00, z: 1993.3, full: true },
+  "800|400|800": { cap: 100.00, z: 1993.3, full: true },
+  "800|450|600": { cap: 91.46, z: 1945.0, full: false },
+  "800|450|700": { cap: 100.00, z: 1993.3, full: true },
+  "800|450|800": { cap: 100.00, z: 1993.3, full: true },
+};
+
+function getMetricsForState(st) {
+  if (customCsvMap) {
+    const fullKey = `${st.s_kiln_mm}|${st.w_floor_pad_mm}|${st.w_door_open_mm}|${st.exhaust_fan_cfm}|${st.d_reflector_mm}|${st.t_reflector_calsil_mm}|${st.g_floor_reflector_mm}|${st.d_hood_inlet_mm}`;
+    if (customCsvMap[fullKey]) return customCsvMap[fullKey];
+  }
+
+  const gKey = `${st.s_kiln_mm}|${st.d_reflector_mm}|${st.t_reflector_calsil_mm}|${st.g_floor_reflector_mm}`;
+  const base = BASE_GEOM_TABLE[gKey] || BASE_GEOM_TABLE["300|1000|10|20"];
+
+  // Plume capture and stratification height come straight from the sweep (depend on door, fan AND hood).
+  const ps = PLUME_STRAT_TABLE[`${st.w_door_open_mm}|${st.exhaust_fan_cfm}|${st.d_hood_inlet_mm}`]
+          || PLUME_STRAT_TABLE["150|450|800"];
+  const zStrat = ps.z, plumeCap = ps.cap, plumeFull = ps.full;
+
+  // Room-air temperature offsets (unchanged approximation).
+  let dRoomLo = 0.0, dRoomUp = 0.0;
+  if (st.exhaust_fan_cfm === 450) {
+    dRoomLo = 0.0; dRoomUp = 0.0;
+  } else if (st.exhaust_fan_cfm === 400) {
+    dRoomLo = 0.06; dRoomUp = 0.30;
+  } else if (st.exhaust_fan_cfm === 350) {
+    dRoomLo = 0.14; dRoomUp = 0.72;
+  } else {
+    if (st.w_door_open_mm === 800) { dRoomLo = 6.9; dRoomUp = 10.6; }
+    else if (st.w_door_open_mm === 150) { dRoomLo = 13.5; dRoomUp = 17.5; }
+    else { dRoomLo = 48.9; dRoomUp = 48.9; }
+  }
+
+  if (st.exhaust_fan_cfm > 0) {
+    if (st.w_door_open_mm === 800) { dRoomLo -= 0.01; dRoomUp -= 0.12; }
+    if (st.w_door_open_mm === 0)   { dRoomLo += 0.14; dRoomUp += 0.21; }
+    if (st.d_hood_inlet_mm === 700) { dRoomUp += 0.22; }
+    if (st.d_hood_inlet_mm === 600) { dRoomUp += 0.85; dRoomLo += 0.32; }
+  }
+
+  const hoodCeilDelta = st.d_hood_inlet_mm === 600 ? 0.5 : (st.d_hood_inlet_mm === 700 ? 0.15 : 0.0);
+  const vinylBase = st.w_floor_pad_mm === 1400 ? base.vin14 : base.vin12;
+
+  return {
+    t_gypsum_max_left_c: +(base.gypL + 0.92 * dRoomLo).toFixed(1),
+    t_gypsum_max_back_c: +(base.gypB + 0.92 * dRoomLo).toFixed(1),
+    t_ssr_air_c: +(base.ssrA + 0.98 * dRoomLo).toFixed(1),
+    t_ssr_case_c: +(base.ssrC + 0.98 * dRoomLo).toFixed(1),
+    t_vip_under_reflector_c: +(base.vipU + 0.98 * dRoomLo).toFixed(1),
+    t_floor_pad_under_reflector_c: +(base.padU + 0.98 * dRoomLo).toFixed(1),
+    t_floor_pad_edge_c: +(base.padE + 0.92 * dRoomLo).toFixed(1),
+    t_vip_outside_reflector_c: +(base.vipO + 0.92 * dRoomLo).toFixed(1),
+    t_vinyl_edge_c: +(vinylBase + 0.93 * dRoomLo).toFixed(1),
+    t_shield_max_c: +(base.shd + 0.92 * dRoomLo).toFixed(1),
+    t_aac_max_c: +(base.aac + 0.88 * dRoomLo).toFixed(1),
+    t_ceiling_max_c: +(base.ceil + 0.95 * dRoomUp + hoodCeilDelta).toFixed(1),
+    t_room_upper_c: +(base.rUp + dRoomUp).toFixed(1),
+    t_room_lower_c: +(base.rLo + dRoomLo).toFixed(1),
+    z_stratification_layer_mm: +zStrat.toFixed(0),
+    plume_capture_fraction: plumeCap,
+    plume_fully_captured: plumeFull
+  };
+}
+
+// Global SVG Coordinate Systems
+const SCALE = 0.52; 
+const PAD_LEFT_PX = 55;
+const PAD_TOP_PX = 30;
+const X_MAX_MM = 1700;
+const Z_MAX_MM = 2520;
+const C_MIN = -GEOM.t_aac; 
+const C_MAX = 1700; 
+
+function zToSvg(z_mm) { return PAD_TOP_PX + (Z_MAX_MM - z_mm) * SCALE; }
+function getU(c) {
+  return state.view === 'side' ? PAD_LEFT_PX + (C_MAX - c) * SCALE : PAD_LEFT_PX + (c - C_MIN) * SCALE;
+}
+// Get the left-most pixel coordinate for a shape spanning c1 to c2
+function getLeft(c1, c2) { return Math.min(getU(c1), getU(c2)); }
+// Get the absolute pixel width for a shape spanning c1 to c2
+function getWidth(c1, c2) { return Math.abs(getU(c2) - getU(c1)); }
+
+// Plan View Maps
+const PLAN_ORIGIN_X = 140;
+const PLAN_ORIGIN_Y = 140;
+function px(mm) { return PLAN_ORIGIN_X + mm * SCALE; }
+function py(mm) { return PLAN_ORIGIN_Y + mm * SCALE; }
+
+function renderElevation() {
+  const svg = document.getElementById('elevation-svg');
+  const m = getMetricsForState(state);
+  
+  if (state.view === 'plan') {
+    renderPlanView(svg, m);
+    return;
+  }
+
+  const isSide = state.view === 'side';
+  document.getElementById('header-subtitle').textContent = isSide 
+    ? 'To-scale elevation viewed from the partition wall facing the left wall (Back wall on right at x = 0 mm)'
+    : 'To-scale elevation viewed from the front doors facing the back wall (Left wall on left at y = 0 mm)';
+  document.getElementById('drag-hint-msg').textContent = '↔ Drag the kiln left or right on the drawing to toggle between 200 mm and 300 mm wall standoffs';
+
+  const x_shield_front = GEOM.d_chimney + GEOM.t_shield; 
+  const c_kiln = x_shield_front + state.s_kiln_mm + GEOM.r_kiln;
+  const c_shield_end = isSide ? x_shield_front + GEOM.w_shield_left : GEOM.d_chimney + GEOM.w_shield_back;
+
+  const z_pad_top = 0;
+  const z_ref_bot = z_pad_top + state.g_floor_reflector_mm;
+  const z_ref_top = z_ref_bot + state.t_reflector_calsil_mm;
+  const z_drum_bot = z_pad_top + GEOM.h_kiln_base;
+  const z_drum_top = z_drum_bot + GEOM.h_drum;
+  const z_kiln_top = z_drum_top + GEOM.t_lid;
+  const z_ssr_bot = z_drum_bot + GEOM.z_ssr_offset;
+  const z_ssr_top = z_ssr_bot + GEOM.h_ssr;
+  const z_hood_inlet = GEOM.h_wall - GEOM.z_hood_drop;
+
+  const r_ref = 0.5 * state.d_reflector_mm;
+  const dz_gap = Math.max(0, z_ref_top - z_pad_top);
+  const dz_kiln_ref = Math.max(1, z_drum_bot - z_ref_top);
+  const r_shadow_near = r_ref + Math.max(0, r_ref - GEOM.r_kiln) * (dz_gap / dz_kiln_ref);
+
+  let html = `
+    <defs>
+      <linearGradient id="grad-ss" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#aeb5bd"/>
+        <stop offset="35%" stop-color="#e9ecef"/>
+        <stop offset="70%" stop-color="#ced4da"/>
+        <stop offset="100%" stop-color="#868e96"/>
+      </linearGradient>
+      <linearGradient id="grad-hood" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#3f9e93"/>
+        <stop offset="50%" stop-color="#8fd3c8"/>
+        <stop offset="100%" stop-color="#2e7d74"/>
+      </linearGradient>
+      <linearGradient id="grad-plume" x1="0%" y1="100%" x2="0%" y2="0%">
+        <stop offset="0%" stop-color="rgba(255,107,53,0.28)"/>
+        <stop offset="100%" stop-color="rgba(255,107,53,0.03)"/>
+      </linearGradient>
+      <pattern id="firebrick-pat" width="32" height="14" patternUnits="userSpaceOnUse">
+        <rect width="32" height="14" fill="#e8dcc4"/>
+        <path d="M0 0 H32 M0 7 H32 M16 0 V7 M0 7 V14" stroke="#cbbba0" stroke-width="1"/>
+      </pattern>
+    </defs>
+  `;
+
+  const y_ceil = zToSvg(GEOM.h_wall);
+  const y_floor = zToSvg(0);
+  const y_hood_inlet = zToSvg(z_hood_inlet);
+  const y_kiln_top = zToSvg(z_kiln_top);
+
+  // Background Wall
+  const bgGypsumLbl = isSide ? "EXPOSED GYPSUM (LEFT WALL)" : "EXPOSED GYPSUM (BACK WALL)";
+  const bgShieldLbl = isSide ? `CALSIL HEAT SHIELD (LEFT WALL, ${GEOM.w_shield_left} mm)` : `CALSIL HEAT SHIELD (BACK WALL, ${GEOM.w_shield_back} mm)`;
+  
+  html += `<rect x="${getLeft(c_shield_end, C_MAX)}" y="${y_ceil}" width="${getWidth(c_shield_end, C_MAX)}" height="${y_floor - y_ceil}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
+  html += `<text x="${getLeft(c_shield_end, C_MAX) + 14}" y="${y_ceil + 28}" fill="#555" font-size="12" font-weight="600">${bgGypsumLbl}</text>`;
+
+  const c_shield_start = isSide ? GEOM.d_chimney + GEOM.t_shield : GEOM.d_chimney; 
+  html += `<rect x="${getLeft(c_shield_start, c_shield_end)}" y="${y_ceil}" width="${getWidth(c_shield_start, c_shield_end)}" height="${y_floor - y_ceil}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
+  html += `<text x="${getLeft(c_shield_start, c_shield_end) + 16}" y="${y_ceil + 28}" fill="#e2e6ea" font-size="12" font-weight="600">${bgShieldLbl}</text>`;
+
+  // Stratification layer
+  const y_strat = zToSvg(m.z_stratification_layer_mm);
+  html += `<line x1="${getU(c_shield_start)}" y1="${y_strat}" x2="${getU(C_MAX)}" y2="${y_strat}" stroke="#d97706" stroke-width="1.5" stroke-dasharray="6,5"/>`;
+  html += `<text x="${getLeft(c_shield_start, C_MAX) + 14}" y="${y_strat - 6}" fill="#b45309" font-size="11" font-weight="600">Upper Room Layer (${m.t_room_upper_c.toFixed(1)}°C) / Lower Layer (${m.t_room_lower_c.toFixed(1)}°C) — z = ${m.z_stratification_layer_mm} mm</text>`;
+
+  // Cross-Section Wall (the edge wall)
+  const edgeWallLbl = isSide ? "BACK AAC WALL (215 mm)" : "LEFT AAC WALL (215 mm)";
+  html += `<rect x="${getLeft(C_MIN, 0)}" y="${y_ceil}" width="${getWidth(C_MIN, 0)}" height="${y_floor - y_ceil}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
+  
+  const textAngle = -90;
+  const u_aac_mid = getU(-107.5);
+  html += `<text x="${u_aac_mid}" y="${y_ceil + 140}" fill="#3b4249" font-size="11" font-weight="700" text-anchor="middle" transform="rotate(${textAngle}, ${u_aac_mid}, ${y_ceil + 140})">${edgeWallLbl}</text>`;
+  
+  const c_cross_shield_end = isSide ? GEOM.d_chimney + GEOM.t_shield : GEOM.d_chimney + GEOM.t_shield; 
+  html += `<rect x="${getLeft(0, c_cross_shield_end)}" y="${y_ceil}" width="${getWidth(0, c_cross_shield_end)}" height="${y_floor - y_ceil}" fill="#2f3337" stroke="#1d2023" stroke-width="1"/>`;
+
+  // Ceiling
+  const h_ceil_px = 24;
+  html += `<rect x="${getLeft(C_MIN, C_MAX)}" y="${y_ceil - h_ceil_px}" width="${getWidth(C_MIN, C_MAX)}" height="${h_ceil_px}" fill="#f4efe0" stroke="#9aa2ab" stroke-width="1.5"/>`;
+  html += `<text x="${getLeft(0, C_MAX) + 14}" y="${y_ceil - 7}" fill="#333" font-size="11" font-weight="700">CEILING (z = 2345 mm)</text>`;
+
+  // Subfloor
+  const y_screed_bot = zToSvg(-GEOM.t_screed);
+  const y_vip_bot = zToSvg(-(GEOM.t_screed + GEOM.t_vip));
+
+  html += `<rect x="${getLeft(C_MIN, C_MAX)}" y="${y_floor}" width="${getWidth(C_MIN, C_MAX)}" height="${y_screed_bot - y_floor}" fill="#8c9298" stroke="#6c7278" stroke-width="1"/>`;
+  html += `<rect x="${getLeft(0, state.w_floor_pad_mm)}" y="${y_floor - 10}" width="${getWidth(0, state.w_floor_pad_mm)}" height="12" fill="url(#firebrick-pat)" stroke="#a38f70" stroke-width="1.2"/>`;
+  html += `<text x="${getU(state.w_floor_pad_mm / 2)}" y="${y_screed_bot - 4}" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">STRUCTURAL SCREED + FIREBRICK PAD ZONE (w = ${state.w_floor_pad_mm} mm)</text>`;
+  html += `<rect x="${getLeft(state.w_floor_pad_mm, C_MAX)}" y="${y_floor - 8}" width="${getWidth(state.w_floor_pad_mm, C_MAX)}" height="10" fill="#f3d55b" stroke="#c2a32b" stroke-width="1.2"/>`;
+  html += `<text x="${getU((state.w_floor_pad_mm + C_MAX)/2)}" y="${y_floor - 13}" fill="#7c650b" font-size="11" font-weight="700" text-anchor="middle">VINYL FLOOR</text>`;
+  html += `<rect x="${getLeft(C_MIN, C_MAX)}" y="${y_screed_bot}" width="${getWidth(C_MIN, C_MAX)}" height="${y_vip_bot - y_screed_bot}" fill="#b02a37" stroke="#7a1c24" stroke-width="1"/>`;
+  html += `<text x="${getLeft(0, C_MAX) + 14}" y="${y_vip_bot - 3}" fill="#ffffff" font-size="10" font-weight="600">VIP SUBFLOOR INSULATION (20 mm)</text>`;
+
+  // Buoyant Plume
+  const p_k_l = getU(c_kiln + GEOM.r_kiln);
+  const p_k_r = getU(c_kiln - GEOM.r_kiln);
+  const p_h_l = getU(c_kiln + state.d_hood_inlet_mm / 2);
+  const p_h_r = getU(c_kiln - state.d_hood_inlet_mm / 2);
+  if (m.plume_fully_captured) {
+    html += `<polygon points="${p_k_l},${y_kiln_top} ${p_k_r},${y_kiln_top} ${p_h_r},${y_hood_inlet} ${p_h_l},${y_hood_inlet}" fill="url(#grad-plume)"/>`;
+  } else {
+    // Partial capture: plume is wider than the hood inlet, spills past its edges and reaches the ceiling
+    const spill = Math.min(1, Math.max(0, 1 - m.plume_capture_fraction / 100));
+    const half_in = 0.5 * state.d_hood_inlet_mm * (1.25 + 0.75 * spill);
+    const half_ceil = half_in * 1.15;
+    const q_l = getU(c_kiln + half_in), q_r = getU(c_kiln - half_in);
+    const c_l = getU(c_kiln + half_ceil), c_r = getU(c_kiln - half_ceil);
+    html += `<polygon points="${p_k_l},${y_kiln_top} ${p_k_r},${y_kiln_top} ${q_r},${y_hood_inlet} ${c_r},${y_ceil} ${c_l},${y_ceil} ${q_l},${y_hood_inlet}" fill="url(#grad-plume)" stroke="rgba(217,48,37,0.45)" stroke-width="1" stroke-dasharray="5,4"/>`;
+  }
+
+  // Hood
+  const d_l = getU(c_kiln + GEOM.d_hood_duct / 2);
+  const d_r = getU(c_kiln - GEOM.d_hood_duct / 2);
+  const y_hood_throat = zToSvg(GEOM.h_wall - 140);
+  html += `<g id="hood-group">`;
+  html += `<rect x="${getLeft(c_kiln - GEOM.d_hood_duct/2, c_kiln + GEOM.d_hood_duct/2)}" y="${y_ceil}" width="${GEOM.d_hood_duct * SCALE}" height="${y_hood_throat - y_ceil}" fill="url(#grad-hood)" stroke="#5c636a" stroke-width="1.5"/>`;
+  html += `<polygon points="${d_l},${y_hood_throat} ${d_r},${y_hood_throat} ${p_h_r},${y_hood_inlet} ${p_h_l},${y_hood_inlet}" fill="url(#grad-hood)" stroke="#5c636a" stroke-width="1.5"/>`;
+  html += `<text x="${getU(c_kiln)}" y="${0.5*(y_hood_throat + y_hood_inlet) + 5}" fill="#1f242b" font-size="11" font-weight="700" text-anchor="middle">HOOD Ø${state.d_hood_inlet_mm} mm (${state.exhaust_fan_cfm} CFM)</text>`;
+  html += `</g>`;
+
+  // Reflector
+  const y_ref_top = zToSvg(z_ref_top) - 10;
+  const y_ref_bot = zToSvg(z_ref_bot) - 10;
+  const y_drum_bot = zToSvg(z_drum_bot);
+  const p_s_l = getU(c_kiln + r_shadow_near);
+  const p_s_r = getU(c_kiln - r_shadow_near);
+  html += `<line x1="${p_k_l}" y1="${y_drum_bot}" x2="${p_s_l}" y2="${y_floor - 10}" stroke="#e67700" stroke-width="1.2" stroke-dasharray="4,3"/>`;
+  html += `<line x1="${p_k_r}" y1="${y_drum_bot}" x2="${p_s_r}" y2="${y_floor - 10}" stroke="#e67700" stroke-width="1.2" stroke-dasharray="4,3"/>`;
+
+  if (state.t_reflector_calsil_mm > 0) {
+    html += `<rect x="${getLeft(c_kiln - r_ref, c_kiln + r_ref)}" y="${y_ref_top}" width="${r_ref * 2 * SCALE}" height="${Math.max(4, y_ref_bot - y_ref_top)}" fill="#4a4f55" stroke="#222" stroke-width="1"/>`;
+  }
+  html += `<rect x="${getLeft(c_kiln - r_ref, c_kiln + r_ref)}" y="${y_ref_top - 4}" width="${r_ref * 2 * SCALE}" height="4" fill="url(#grad-ss)" stroke="#495057" stroke-width="1"/>`;
+
+  // Kiln
+  html += `<g id="kiln-draggable" class="draggable-kiln">`;
+  const standW = 22;
+  const w_stand_px = standW * SCALE;
+  html += `<rect x="${getLeft(c_kiln + GEOM.r_kiln - 28, c_kiln + GEOM.r_kiln - 28 - standW)}" y="${y_drum_bot}" width="${w_stand_px}" height="${y_floor - 10 - y_drum_bot}" fill="#006ab1" stroke="#004b7d" stroke-width="1.2"/>`;
+  html += `<rect x="${getLeft(c_kiln - GEOM.r_kiln + 28, c_kiln - GEOM.r_kiln + 28 + standW)}" y="${y_drum_bot}" width="${w_stand_px}" height="${y_floor - 10 - y_drum_bot}" fill="#006ab1" stroke="#004b7d" stroke-width="1.2"/>`;
+  html += `<rect x="${getLeft(c_kiln - GEOM.r_kiln + 28, c_kiln + GEOM.r_kiln - 28)}" y="${y_drum_bot + 16}" width="${getWidth(c_kiln - GEOM.r_kiln + 28, c_kiln + GEOM.r_kiln - 28)}" height="12" fill="#006ab1" stroke="#004b7d" stroke-width="1"/>`;
+
+  const y_drum_top_px = zToSvg(z_drum_top);
+  html += `<rect class="kiln-outline" x="${getLeft(c_kiln - GEOM.r_kiln, c_kiln + GEOM.r_kiln)}" y="${y_drum_top_px}" width="${GEOM.d_kiln * SCALE}" height="${y_drum_bot - y_drum_top_px}" fill="url(#grad-ss)" stroke="#495057" stroke-width="2" rx="4"/>`;
+  const y_kiln_top_px = zToSvg(z_kiln_top);
+  html += `<rect class="kiln-outline" x="${getLeft(c_kiln - GEOM.r_kiln - 4, c_kiln + GEOM.r_kiln + 4)}" y="${y_kiln_top_px}" width="${(GEOM.d_kiln + 8) * SCALE}" height="${y_drum_top_px - y_kiln_top_px}" fill="url(#grad-ss)" stroke="#343a40" stroke-width="2" rx="3"/>`;
+
+  // SSR Box (at -45 deg projected)
+  const c_ssr = isSide ? c_kiln + (GEOM.r_kiln + 0.5 * GEOM.d_ssr) * Math.cos(Math.PI / 4) : c_kiln - (GEOM.r_kiln + 0.5 * GEOM.d_ssr) * Math.cos(Math.PI / 4);
+  const y_ssr_top_px = zToSvg(z_ssr_top);
+  const y_ssr_bot_px = zToSvg(z_ssr_bot);
+  const u_ssr = getU(c_ssr);
+  html += `<rect x="${getLeft(c_ssr - 27, c_ssr + 27)}" y="${y_ssr_top_px}" width="${54 * SCALE}" height="${y_ssr_bot_px - y_ssr_top_px}" fill="#ced4da" stroke="#343a40" stroke-width="1.5" rx="2"/>`;
+  html += `<text x="${u_ssr}" y="${0.5*(y_ssr_top_px + y_ssr_bot_px)}" fill="#212529" font-size="10" font-weight="700" text-anchor="middle" transform="rotate(-90, ${u_ssr}, ${0.5*(y_ssr_top_px + y_ssr_bot_px)})">SSR BOX</text>`;
+
+  html += `<text x="${getU(c_kiln)}" y="${0.5*(y_drum_top_px + y_drum_bot) - 8}" fill="#1f242b" font-size="14" font-weight="800" text-anchor="middle">ROHDE ECOTOP 60</text>`;
+  html += `<text x="${getU(c_kiln)}" y="${0.5*(y_drum_top_px + y_drum_bot) + 12}" fill="#343a40" font-size="11" font-weight="600" text-anchor="middle">⇄ Drag Left / Right (s = ${state.s_kiln_mm} mm)</text>`;
+  html += `</g>`;
+
+  const y_dim = 0.5 * (y_drum_top_px + y_drum_bot) + 45;
+  const c_kiln_wall_edge = isSide ? c_kiln - GEOM.r_kiln : c_kiln - GEOM.r_kiln;
+  html += `<line x1="${getU(c_kiln_wall_edge)}" y1="${y_dim}" x2="${getU(c_shield_start)}" y2="${y_dim}" stroke="#111" stroke-width="5"/>`;
+  html += `<line x1="${getU(c_kiln_wall_edge)}" y1="${y_dim}" x2="${getU(c_shield_start)}" y2="${y_dim}" stroke="#ffe14d" stroke-width="2.5"/>`;
+  html += `<text x="${getU((c_kiln_wall_edge + c_shield_start)/2)}" y="${y_dim - 8}" fill="#ffe14d" stroke="#111" stroke-width="3.5" paint-order="stroke" font-size="13" font-weight="800" text-anchor="middle">${state.s_kiln_mm} mm</text>`;
+
+  // Sensors
+  const c_ceil = c_kiln + (0.5 * state.d_hood_inlet_mm + 10) * Math.SQRT1_2;
+  const c_pad_out = c_kiln + (r_shadow_near + 20) * Math.SQRT1_2;
+
+  const sensors = [
+    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, c: c_ceil, y_px: y_ceil - 12, lbl_dx: isSide ? 50 : -50, lbl_dy: 28 },
+    { id: "gyp", label: isSide ? "Gypsum Max (Left)" : "Gypsum Max (Back)", temp: isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c, safe: (isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c) < LIMITS.gypsum, c: c_shield_end + 35, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum), lbl_dx: isSide ? 55 : -55, lbl_dy: -24 },
+    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, c: c_shield_start, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum), lbl_dx: isSide ? 70 : -70, lbl_dy: -22 },
+    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, c: -100, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) + 46, lbl_dx: isSide ? -38 : 38, lbl_dy: 4 },
+    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air && m.t_ssr_case_c < LIMITS.ssr_case, c: c_ssr, y_px: y_ssr_top_px + 24, lbl_dx: isSide ? 62 : -62, lbl_dy: -22 },
+    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, c: c_kiln - 24, y_px: y_floor - 4, lbl_dx: isSide ? 65 : -65, lbl_dy: -20 },
+    { id: "vip_under", label: "VIP Under Kiln Center", temp: m.t_vip_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, c: c_kiln + 24, y_px: 0.5 * (y_screed_bot + y_vip_bot) + 12, lbl_dx: isSide ? -30 : 30, lbl_dy: 24 },
+    { id: "pad_edge", label: "Pad Outside Reflector", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, c: c_pad_out - 18, y_px: y_floor - 4, lbl_dx: isSide ? 75 : -75, lbl_dy: -22 },
+    { id: "vip_out", label: "VIP Outside Reflector", temp: m.t_vip_outside_reflector_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, c: c_pad_out + 18, y_px: 0.5 * (y_screed_bot + y_vip_bot) + 12, lbl_dx: isSide ? 70 : -70, lbl_dy: 26 },
+    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, c: state.w_floor_pad_mm + 25, y_px: y_floor - 4, lbl_dx: isSide ? 45 : -45, lbl_dy: -24 }
+  ];
+
+  for (const s of sensors) {
+    const ringColor = s.safe ? "#2ea043" : "#d93025";
+    const px = getU(s.c);
+    html += `<g class="sensor-node">`;
+    html += `<line x1="${px}" y1="${s.y_px}" x2="${px + s.lbl_dx * 0.45}" y2="${s.y_px + s.lbl_dy * 0.7}" stroke="#222" stroke-width="1.2"/>`;
+    html += `<circle cx="${px}" cy="${s.y_px}" r="18" fill="#111111" stroke="${ringColor}" stroke-width="3"/>`;
+    html += `<text x="${px}" y="${s.y_px + 4}" fill="#ffffff" font-size="10.5" font-weight="700" text-anchor="middle">${s.temp.toFixed(1)}°</text>`;
+    html += `<rect x="${px + s.lbl_dx - s.label.length * 3.1 - 5}" y="${s.y_px + s.lbl_dy - 12}" width="${s.label.length * 6.2 + 10}" height="16" rx="3" fill="rgba(255,255,255,0.92)" stroke="#ced4da" stroke-width="1"/>`;
+    html += `<text x="${px + s.lbl_dx}" y="${s.y_px + s.lbl_dy}" fill="#111" font-size="10.5" font-weight="700" text-anchor="middle">${s.label}</text>`;
+    html += `</g>`;
+  }
+
+  svg.innerHTML = html;
+  attachKilnDragHandler(svg);
+  renderSidebarMetrics(m);
+}
+
+function renderPlanView(svg, m) {
+  document.getElementById('header-subtitle').textContent = 'To-scale top-down plan view of the studio corner (Left wall runs along +x; Back wall runs along +y)';
+  document.getElementById('drag-hint-msg').textContent = '⤡ Drag the kiln diagonally to toggle between 200 mm and 300 mm wall standoffs';
+
+  const x_kiln = GEOM.d_chimney + GEOM.t_shield + state.s_kiln_mm + GEOM.r_kiln;
+  const y_kiln = GEOM.d_chimney + GEOM.t_shield + state.s_kiln_mm + GEOM.r_kiln;
+  const r_ref = 0.5 * state.d_reflector_mm;
+
+  let html = `
+    <defs>
+      <linearGradient id="grad-ss" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#aeb5bd"/>
+        <stop offset="35%" stop-color="#e9ecef"/>
+        <stop offset="70%" stop-color="#ced4da"/>
+        <stop offset="100%" stop-color="#868e96"/>
+      </linearGradient>
+      <linearGradient id="grad-hood" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#3f9e93"/>
+        <stop offset="50%" stop-color="#8fd3c8"/>
+        <stop offset="100%" stop-color="#2e7d74"/>
+      </linearGradient>
+      <pattern id="firebrick-pat" width="32" height="14" patternUnits="userSpaceOnUse">
+        <rect width="32" height="14" fill="#e8dcc4"/>
+        <path d="M0 0 H32 M0 7 H32 M16 0 V7 M0 7 V14" stroke="#cbbba0" stroke-width="1"/>
+      </pattern>
+    </defs>
+  `;
+
+  // Vinyl Floor (Background)
+  html += `<rect x="${px(0)}" y="${py(0)}" width="${1700*SCALE}" height="${1700*SCALE}" fill="#f3d55b" stroke="#c2a32b" stroke-width="1.2"/>`;
+  html += `<text x="${px(950)}" y="${py(1600)}" fill="#7c650b" font-size="14" font-weight="700" text-anchor="middle">VINYL FLOOR</text>`;
+
+  // Floor Pad
+  html += `<rect x="${px(0)}" y="${py(0)}" width="${state.w_floor_pad_mm*SCALE}" height="${state.w_floor_pad_mm*SCALE}" fill="url(#firebrick-pat)" stroke="#a38f70" stroke-width="1.5"/>`;
+
+  // AAC Walls
+  html += `<rect x="${px(-GEOM.t_aac)}" y="${py(-GEOM.t_aac)}" width="${(1700 + GEOM.t_aac)*SCALE}" height="${GEOM.t_aac*SCALE}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
+  html += `<rect x="${px(-GEOM.t_aac)}" y="${py(0)}" width="${GEOM.t_aac*SCALE}" height="${1700*SCALE}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
+  html += `<text x="${px(850)}" y="${py(-100)}" fill="#3b4249" font-size="11" font-weight="700" text-anchor="middle">LEFT AAC WALL (215 mm)</text>`;
+  html += `<text x="${px(-100)}" y="${py(850)}" fill="#3b4249" font-size="11" font-weight="700" text-anchor="middle" transform="rotate(-90, ${px(-100)}, ${py(850)})">BACK AAC WALL (215 mm)</text>`;
+
+  // Exposed Gypsum
+  html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left)}" y="${py(0)}" width="${(1700 - GEOM.d_chimney - GEOM.t_shield - GEOM.w_shield_left)*SCALE}" height="${GEOM.t_gypsum*SCALE}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
+  html += `<rect x="${px(0)}" y="${py(GEOM.d_chimney + GEOM.w_shield_back)}" width="${GEOM.t_gypsum*SCALE}" height="${(1700 - GEOM.d_chimney - GEOM.w_shield_back)*SCALE}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
+
+  // Heat Shields (Corner Butt-Joint)
+  html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield)}" y="${py(GEOM.d_chimney)}" width="${GEOM.w_shield_left*SCALE}" height="${GEOM.t_shield*SCALE}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
+  html += `<rect x="${px(GEOM.d_chimney)}" y="${py(GEOM.d_chimney)}" width="${GEOM.t_shield*SCALE}" height="${GEOM.w_shield_back*SCALE}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
+
+  // Reflector
+  html += `<circle cx="${px(x_kiln)}" cy="${py(y_kiln)}" r="${r_ref * SCALE}" fill="url(#grad-ss)" stroke="#495057" stroke-width="1"/>`;
+
+  // Kiln Stand (Abstract Box)
+  const standW = GEOM.r_kiln * 0.75 * SCALE;
+  html += `<rect x="${px(x_kiln) - standW}" y="${py(y_kiln) - standW}" width="${standW*2}" height="${standW*2}" fill="none" stroke="#006ab1" stroke-width="4" stroke-dasharray="8,5"/>`;
+
+  // Kiln Drum & Lid
+  html += `<g id="kiln-draggable" class="draggable-kiln plan-drag">`;
+  html += `<circle class="kiln-outline" cx="${px(x_kiln)}" cy="${py(y_kiln)}" r="${(GEOM.r_kiln + 4)*SCALE}" fill="url(#grad-ss)" stroke="#343a40" stroke-width="2"/>`;
+  
+  // SSR Box (at -45 deg)
+  html += `<g transform="rotate(-45, ${px(x_kiln)}, ${py(y_kiln)})">`;
+  html += `<rect x="${px(x_kiln + GEOM.r_kiln)}" y="${py(y_kiln) - GEOM.w_ssr/2 * SCALE}" width="${GEOM.d_ssr * SCALE}" height="${GEOM.w_ssr * SCALE}" fill="#ced4da" stroke="#343a40" stroke-width="1.5" rx="2"/>`;
+  html += `</g>`;
+
+  // Hood & Duct
+  html += `<circle cx="${px(x_kiln)}" cy="${py(y_kiln)}" r="${(state.d_hood_inlet_mm/2)*SCALE}" fill="rgba(63,158,147,0.35)" stroke="#2e7d74" stroke-width="2" stroke-dasharray="6,4"/>`;
+  html += `<circle cx="${px(x_kiln)}" cy="${py(y_kiln)}" r="${(GEOM.d_hood_duct/2)*SCALE}" fill="#5fb8ad" stroke="#2e7d74" stroke-width="2"/>`;
+  html += `</g>`; 
+
+  // Sensors for Plan View
+  const r_ceil = (state.d_hood_inlet_mm/2) + 10;
+  const dz_gap = Math.max(0, state.g_floor_reflector_mm + state.t_reflector_calsil_mm);
+  const dz_kiln_ref = Math.max(1, GEOM.h_kiln_base - state.g_floor_reflector_mm - state.t_reflector_calsil_mm);
+  const r_shadow_near = r_ref + Math.max(0, r_ref - GEOM.r_kiln) * (dz_gap / dz_kiln_ref);
+
+  const sensors = [
+    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln - r_ceil * Math.SQRT1_2, lbl_dx: -20, lbl_dy: -30 },
+    { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: m.t_gypsum_max_left_c < LIMITS.gypsum, x: GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left + 45, y: 12.5, lbl_dx: 0, lbl_dy: -25 },
+    { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: m.t_gypsum_max_back_c < LIMITS.gypsum, x: 12.5, y: GEOM.d_chimney + GEOM.w_shield_back + 45, lbl_dx: -65, lbl_dy: 25 },
+    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, x: x_kiln, y: 6, lbl_dx: 0, lbl_dy: -28 },
+    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, x: x_kiln, y: -100, lbl_dx: 0, lbl_dy: -28 },
+    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air, x: x_kiln + (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, y: y_kiln - (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, lbl_dx: 30, lbl_dy: -25 },
+    { id: "pad_under", label: "Pad Under Ref", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, x: x_kiln, y: y_kiln, lbl_dx: -30, lbl_dy: 30 },
+    { id: "pad_edge", label: "Pad Edge (Out)", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, x: x_kiln + (r_shadow_near + 20) * Math.SQRT1_2, y: y_kiln + (r_shadow_near + 20) * Math.SQRT1_2, lbl_dx: 30, lbl_dy: 25 },
+    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, x: state.w_floor_pad_mm + 25, y: y_kiln, lbl_dx: 25, lbl_dy: -25 }
+  ];
+
+  for (const s of sensors) {
+    const ringColor = s.safe ? "#2ea043" : "#d93025";
+    const s_px = px(s.x);
+    const s_py = py(s.y);
+    html += `<g class="sensor-node">`;
+    html += `<line x1="${s_px}" y1="${s_py}" x2="${s_px + s.lbl_dx * 0.45}" y2="${s_py + s.lbl_dy * 0.7}" stroke="#222" stroke-width="1.2"/>`;
+    html += `<circle cx="${s_px}" cy="${s_py}" r="18" fill="#111111" stroke="${ringColor}" stroke-width="3"/>`;
+    html += `<text x="${s_px}" y="${s_py + 4}" fill="#ffffff" font-size="10.5" font-weight="700" text-anchor="middle">${s.temp.toFixed(1)}°</text>`;
+    html += `<rect x="${s_px + s.lbl_dx - s.label.length * 3.1 - 5}" y="${s_py + s.lbl_dy - 12}" width="${s.label.length * 6.2 + 10}" height="16" rx="3" fill="rgba(255,255,255,0.92)" stroke="#ced4da" stroke-width="1"/>`;
+    html += `<text x="${s_px + s.lbl_dx}" y="${s_py + s.lbl_dy}" fill="#111" font-size="10.5" font-weight="700" text-anchor="middle">${s.label}</text>`;
+    html += `</g>`;
+  }
+
+  svg.innerHTML = html;
+  attachKilnDragHandler(svg);
+  renderSidebarMetrics(m);
+}
+
+function renderSidebarMetrics(m) {
+  document.getElementById('plume-summary').textContent =
+    `Plume Capture: ${m.plume_capture_fraction.toFixed(1)}% (${m.plume_fully_captured ? 'Full Capture' : 'Partial Spill'})`;
+
+  const items = [
+    { name: "Ceiling Max Temp", val: `${m.t_ceiling_max_c.toFixed(1)} °C`, lim: "< 40.0 °C", ok: m.t_ceiling_max_c < LIMITS.ceiling },
+    { name: "Gypsum Max (Left / Back)", val: `${m.t_gypsum_max_left_c.toFixed(1)} / ${m.t_gypsum_max_back_c.toFixed(1)} °C`, lim: "< 40.0 °C", ok: m.t_gypsum_max_left_c < LIMITS.gypsum },
+    { name: "SSR Air / Casing", val: `${m.t_ssr_air_c.toFixed(1)} / ${m.t_ssr_case_c.toFixed(1)} °C`, lim: "< 35 / 45 °C", ok: m.t_ssr_air_c < LIMITS.ssr_air && m.t_ssr_case_c < LIMITS.ssr_case },
+    { name: "VIP Under Reflector", val: `${m.t_vip_under_reflector_c.toFixed(1)} °C`, lim: "< 50.0 °C", ok: m.t_vip_under_reflector_c < LIMITS.vip },
+    { name: "Pad Under Reflector", val: `${m.t_floor_pad_under_reflector_c.toFixed(1)} °C`, lim: "Ref. Center", ok: m.t_vip_under_reflector_c < LIMITS.vip },
+    { name: "VIP Outside Reflector", val: `${m.t_vip_outside_reflector_c.toFixed(1)} °C`, lim: "< 50.0 °C", ok: m.t_vip_outside_reflector_c < LIMITS.vip },
+    { name: "Pad Outside Reflector", val: `${m.t_floor_pad_edge_c.toFixed(1)} °C`, lim: "Shadow Edge", ok: m.t_vip_outside_reflector_c < LIMITS.vip },
+    { name: "Vinyl Floor Edge", val: `${m.t_vinyl_edge_c.toFixed(1)} °C`, lim: "< 45.0 °C", ok: m.t_vinyl_edge_c < LIMITS.vinyl },
+    { name: "Calsil Shield / AAC Max", val: `${m.t_shield_max_c.toFixed(1)} / ${m.t_aac_max_c.toFixed(1)} °C`, lim: "Behind Kiln", ok: true },
+    { name: "Room Air (Upper / Lower)", val: `${m.t_room_upper_c.toFixed(1)} / ${m.t_room_lower_c.toFixed(1)} °C`, lim: `z = ${m.z_stratification_layer_mm} mm`, ok: true }
+  ];
+
+  const container = document.getElementById('metric-list');
+  container.innerHTML = items.map(it => `
+    <div class="metric-row">
+      <div>
+        <div class="metric-name">${it.name}</div>
+        <div class="metric-limit">${it.lim}</div>
+      </div>
+      <span class="metric-badge ${it.ok ? '' : 'unsafe'}">${it.val}</span>
+    </div>
+  `).join('');
+}
+
+function syncControlButtons() {
+  const bindings = [
+    ['ctrl-view',  null,        state.view, ''],
+    ['ctrl-skiln', 'lbl-skiln', state.s_kiln_mm, ' mm'],
+    ['ctrl-fan',   'lbl-fan',   state.exhaust_fan_cfm, ' CFM'],
+    ['ctrl-hood',  'lbl-hood',  state.d_hood_inlet_mm, ' mm'],
+    ['ctrl-dref',  'lbl-dref',  state.d_reflector_mm, ' mm'],
+    ['ctrl-gref',  'lbl-gref',  state.g_floor_reflector_mm, ' mm'],
+    ['ctrl-tref',  'lbl-tref',  state.t_reflector_calsil_mm, ' mm'],
+    ['ctrl-wpad',  'lbl-wpad',  state.w_floor_pad_mm, ' mm'],
+    ['ctrl-door',  'lbl-door',  state.w_door_open_mm, ' mm']
+  ];
+  for (const [groupId, lblId, val, unit] of bindings) {
+    if (lblId) document.getElementById(lblId).textContent = val + unit;
+    const btns = document.querySelectorAll(`#${groupId} button`);
+    btns.forEach(b => {
+      const bVal = b.dataset.val;
+      b.classList.toggle('active', isNaN(val) ? (bVal === val) : (Number(bVal) === val));
+      if (groupId === 'ctrl-gref') {
+        b.disabled = (state.t_reflector_calsil_mm === 10 && Number(bVal) < 10);
+      }
+    });
+  }
+}
+
+function setupControls() {
+  const map = {
+    'ctrl-view':  ['view', 'view'],
+    'ctrl-skiln': ['s_kiln_mm', 'skiln'],
+    'ctrl-fan':   ['exhaust_fan_cfm', 'fan'],
+    'ctrl-hood':  ['d_hood_inlet_mm', 'hood'],
+    'ctrl-dref':  ['d_reflector_mm', 'dref'],
+    'ctrl-gref':  ['g_floor_reflector_mm', 'gref'],
+    'ctrl-tref':  ['t_reflector_calsil_mm', 'tref'],
+    'ctrl-wpad':  ['w_floor_pad_mm', 'wpad'],
+    'ctrl-door':  ['w_door_open_mm', 'door']
+  };
+  for (const [id, [prop, key]] of Object.entries(map)) {
+    document.querySelectorAll(`#${id} button`).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = btn.dataset.val;
+        state[prop] = isNaN(val) ? val : Number(val);
+        enforceValidReflectorCombo(key);
+        syncControlButtons();
+        renderElevation();
+      });
+    });
+  }
+}
+
+function attachKilnDragHandler(svg) {
+  const kilnGroup = document.getElementById('kiln-draggable');
+  if (!kilnGroup) return;
+  let dragging = false;
+
+  kilnGroup.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    kilnGroup.setPointerCapture(e.pointerId);
+  });
+
+  kilnGroup.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
+    
+    let c_kiln;
+    if (state.view === 'side') {
+      c_kiln = C_MAX - (svgP.x - PAD_LEFT_PX) / SCALE;
+    } else if (state.view === 'front') {
+      c_kiln = C_MIN + (svgP.x - PAD_LEFT_PX) / SCALE;
+    } else {
+      c_kiln = (svgP.x - PLAN_ORIGIN_X) / SCALE;
+    }
+    
+    const standoff_mm = c_kiln - GEOM.t_shield - GEOM.r_kiln - GEOM.d_chimney;
+    const snapped = standoff_mm >= 250 ? 300 : 200;
+    if (snapped !== state.s_kiln_mm) {
+      state.s_kiln_mm = snapped;
+      syncControlButtons();
+      renderElevation();
+    }
+  });
+
+  kilnGroup.addEventListener('pointerup', () => { dragging = false; });
+}
+
+document.getElementById('csv-file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const lines = evt.target.result.trim().split(/\r?\n/);
+    const headers = lines[0].split(',');
+    const idx = {};
+    headers.forEach((h, i) => idx[h.trim()] = i);
+    const map = {};
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',');
+      if (cols.length < headers.length) continue;
+      const key = [
+        cols[idx.s_kiln_mm], cols[idx.w_floor_pad_mm], cols[idx.w_door_open_mm],
+        cols[idx.exhaust_fan_cfm], cols[idx.d_reflector_mm],
+        cols[idx.t_reflector_calsil_mm], cols[idx.g_floor_reflector_mm],
+        cols[idx.d_hood_inlet_mm]
+      ].join('|');
+      map[key] = {
+        t_gypsum_max_left_c: parseFloat(cols[idx.t_gypsum_max_left_c]),
+        t_gypsum_max_back_c: parseFloat(cols[idx.t_gypsum_max_back_c]),
+        t_ssr_air_c: parseFloat(cols[idx.t_ssr_air_c]),
+        t_ssr_case_c: parseFloat(cols[idx.t_ssr_case_c]),
+        t_vip_under_reflector_c: parseFloat(cols[idx.t_vip_under_reflector_c]),
+        t_floor_pad_under_reflector_c: parseFloat(cols[idx.t_floor_pad_under_reflector_c]),
+        t_floor_pad_edge_c: parseFloat(cols[idx.t_floor_pad_edge_c]),
+        t_vip_outside_reflector_c: parseFloat(cols[idx.t_vip_outside_reflector_c]),
+        t_vinyl_edge_c: parseFloat(cols[idx.t_vinyl_edge_c]),
+        t_shield_max_c: parseFloat(cols[idx.t_shield_max_c]),
+        t_aac_max_c: parseFloat(cols[idx.t_aac_max_c]),
+        t_ceiling_max_c: parseFloat(cols[idx.t_ceiling_max_c]),
+        t_room_upper_c: parseFloat(cols[idx.t_room_upper_c]),
+        t_room_lower_c: parseFloat(cols[idx.t_room_lower_c]),
+        z_stratification_layer_mm: parseFloat(cols[idx.z_stratification_layer_mm]),
+        plume_capture_fraction: parseFloat(cols[idx.plume_capture_fraction]) * 100.0,
+        plume_fully_captured: cols[idx.plume_fully_captured].trim() === 'True'
+      };
+    }
+    customCsvMap = map;
+    document.getElementById('data-status').textContent = `Loaded ${Object.keys(map).length} CSV Rows`;
+    renderElevation();
+  };
+  reader.readAsText(file);
+});
+
+setupControls();
+syncControlButtons();
+renderElevation();
+</script>
+</body>
+</html>
