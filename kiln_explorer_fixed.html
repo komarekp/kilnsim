@@ -163,7 +163,7 @@
     .svg-container {
       flex: 1;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
       padding: 10px;
       background: #ffffff;
@@ -630,6 +630,53 @@ const PLAN_ORIGIN_Y = 140;
 function px(mm) { return PLAN_ORIGIN_X + mm * SCALE; }
 function py(mm) { return PLAN_ORIGIN_Y + mm * SCALE; }
 
+// ---------- Text / callout helpers (graphical font sizes are 2x the original) ----------
+const FS = { small: 20, label: 22, big: 28 };
+function textW(str, fs) { return str.length * fs * 0.6; }
+function vText(x, y, txt, fs, fill, extra = '') {
+  return `<text x="${x}" y="${y}" fill="${fill}" font-size="${fs}" font-weight="700" text-anchor="middle" dominant-baseline="central" transform="rotate(-90, ${x}, ${y})" ${extra}>${txt}</text>`;
+}
+// Sensor dots inside the drawing, with labelled callout boxes stacked in side gutters.
+// o = { leftEdge, rightEdge, centerX, top, bottom }
+function renderCallouts(sensors, o) {
+  const BOX_H = 56, GAP = 8, LEAD = 34;
+  const groups = { left: [], right: [] };
+  for (const s of sensors) groups[s.side || (s.x < o.centerX ? 'left' : 'right')].push(s);
+  let lines = '', boxes = '', dots = '';
+  for (const [side, list] of Object.entries(groups)) {
+    list.sort((a, b) => a.y - b.y);
+    const ys = list.map(s => s.y - BOX_H / 2);
+    for (let i = 0; i < ys.length; i++) {
+      ys[i] = Math.max(ys[i], o.top);
+      if (i > 0) ys[i] = Math.max(ys[i], ys[i - 1] + BOX_H + GAP);
+    }
+    for (let i = ys.length - 1; i >= 0; i--) {
+      const lim = i === ys.length - 1 ? o.bottom - BOX_H : ys[i + 1] - BOX_H - GAP;
+      ys[i] = Math.min(ys[i], lim);
+    }
+    list.forEach((s, i) => {
+      const ring = s.safe ? '#2ea043' : '#d93025';
+      const tempTxt = `${s.temp.toFixed(1)} °C`;
+      const w = Math.max(textW(s.label, FS.small), textW(tempTxt, FS.label)) + 22;
+      const bx = side === 'left' ? o.leftEdge - LEAD - w : o.rightEdge + LEAD;
+      const by = ys[i];
+      const ax = side === 'left' ? bx + w : bx, ay = by + BOX_H / 2;
+      const ex = side === 'left' ? o.leftEdge - 6 : o.rightEdge + 6;
+      const pts = `${s.x},${s.y} ${ex},${ay} ${ax},${ay}`;
+      lines += `<polyline points="${pts}" fill="none" stroke="#ffffff" stroke-width="5" stroke-linejoin="round" opacity="0.85"/>`;
+      lines += `<polyline points="${pts}" fill="none" stroke="#1f242b" stroke-width="2" stroke-linejoin="round"/>`;
+      dots  += `<circle cx="${s.x}" cy="${s.y}" r="11" fill="${ring}" stroke="#ffffff" stroke-width="3"/>`;
+      dots  += `<circle cx="${s.x}" cy="${s.y}" r="13" fill="none" stroke="#1f242b" stroke-width="1.5"/>`;
+      boxes += `<g class="sensor-node">`;
+      boxes += `<rect x="${bx}" y="${by}" width="${w}" height="${BOX_H}" rx="6" fill="#ffffff" stroke="${ring}" stroke-width="3"/>`;
+      boxes += `<text x="${bx + 11}" y="${by + 22}" fill="#1f242b" font-size="${FS.small}" font-weight="600">${s.label}</text>`;
+      boxes += `<text x="${bx + 11}" y="${by + 47}" fill="${s.safe ? '#1a7f37' : '#c5221f'}" font-size="${FS.label}" font-weight="800">${tempTxt}</text>`;
+      boxes += `</g>`;
+    });
+  }
+  return lines + dots + boxes;
+}
+
 function renderElevation() {
   const svg = document.getElementById('elevation-svg');
   const m = getMetricsForState(state);
@@ -694,36 +741,34 @@ function renderElevation() {
   const y_kiln_top = zToSvg(z_kiln_top);
 
   // Background Wall
-  const bgGypsumLbl = isSide ? "EXPOSED GYPSUM (LEFT WALL)" : "EXPOSED GYPSUM (BACK WALL)";
-  const bgShieldLbl = isSide ? `CALSIL HEAT SHIELD (LEFT WALL, ${GEOM.w_shield_left} mm)` : `CALSIL HEAT SHIELD (BACK WALL, ${GEOM.w_shield_back} mm)`;
-  
-  html += `<rect x="${getLeft(c_shield_end, C_MAX)}" y="${y_ceil}" width="${getWidth(c_shield_end, C_MAX)}" height="${y_floor - y_ceil}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
-  html += `<text x="${getLeft(c_shield_end, C_MAX) + 14}" y="${y_ceil + 28}" fill="#555" font-size="12" font-weight="600">${bgGypsumLbl}</text>`;
+  const bgShieldLbl = `CALSIL HEAT SHIELD (${isSide ? GEOM.w_shield_left : GEOM.w_shield_back} mm)`;
+  const c_shield_start = isSide ? GEOM.d_chimney + GEOM.t_shield : GEOM.d_chimney;
+  const u_gyp_l = getLeft(c_shield_end, C_MAX), u_gyp_w = getWidth(c_shield_end, C_MAX);
 
-  const c_shield_start = isSide ? GEOM.d_chimney + GEOM.t_shield : GEOM.d_chimney; 
+  html += `<rect x="${u_gyp_l}" y="${y_ceil}" width="${u_gyp_w}" height="${y_floor - y_ceil}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
   html += `<rect x="${getLeft(c_shield_start, c_shield_end)}" y="${y_ceil}" width="${getWidth(c_shield_start, c_shield_end)}" height="${y_floor - y_ceil}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
-  html += `<text x="${getLeft(c_shield_start, c_shield_end) + 16}" y="${y_ceil + 28}" fill="#e2e6ea" font-size="12" font-weight="600">${bgShieldLbl}</text>`;
 
-  // Stratification layer
+  // Stratification layer (line across the room; text sits in the exposed-gypsum strip)
   const y_strat = zToSvg(m.z_stratification_layer_mm);
-  html += `<line x1="${getU(c_shield_start)}" y1="${y_strat}" x2="${getU(C_MAX)}" y2="${y_strat}" stroke="#d97706" stroke-width="1.5" stroke-dasharray="6,5"/>`;
-  html += `<text x="${getLeft(c_shield_start, C_MAX) + 14}" y="${y_strat - 6}" fill="#b45309" font-size="11" font-weight="600">Upper Room Layer (${m.t_room_upper_c.toFixed(1)}°C) / Lower Layer (${m.t_room_lower_c.toFixed(1)}°C) — z = ${m.z_stratification_layer_mm} mm</text>`;
+  html += `<line x1="${getU(c_shield_start)}" y1="${y_strat}" x2="${getU(C_MAX)}" y2="${y_strat}" stroke="#d97706" stroke-width="2.5" stroke-dasharray="10,7"/>`;
+  const strat_x = u_gyp_l + 12;
+  html += `<text x="${strat_x}" y="${y_strat - 40}" fill="#7c2d12" font-size="${FS.small}" font-weight="700">Layer z = ${m.z_stratification_layer_mm} mm</text>`;
+  html += `<text x="${strat_x}" y="${y_strat - 12}" fill="#92400e" font-size="${FS.small}" font-weight="700">▲ Upper ${m.t_room_upper_c.toFixed(1)} °C</text>`;
+  html += `<text x="${strat_x}" y="${y_strat + 28}" fill="#92400e" font-size="${FS.small}" font-weight="700">▼ Lower ${m.t_room_lower_c.toFixed(1)} °C</text>`;
 
   // Cross-Section Wall (the edge wall)
   const edgeWallLbl = isSide ? "BACK AAC WALL (215 mm)" : "LEFT AAC WALL (215 mm)";
   html += `<rect x="${getLeft(C_MIN, 0)}" y="${y_ceil}" width="${getWidth(C_MIN, 0)}" height="${y_floor - y_ceil}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
-  
-  const textAngle = -90;
-  const u_aac_mid = getU(-107.5);
-  html += `<text x="${u_aac_mid}" y="${y_ceil + 140}" fill="#3b4249" font-size="11" font-weight="700" text-anchor="middle" transform="rotate(${textAngle}, ${u_aac_mid}, ${y_ceil + 140})">${edgeWallLbl}</text>`;
-  
-  const c_cross_shield_end = isSide ? GEOM.d_chimney + GEOM.t_shield : GEOM.d_chimney + GEOM.t_shield; 
+  html += vText(getU(-107.5), y_ceil + 190, edgeWallLbl, FS.label, '#2d2440');
+
+  const c_cross_shield_end = GEOM.d_chimney + GEOM.t_shield;
   html += `<rect x="${getLeft(0, c_cross_shield_end)}" y="${y_ceil}" width="${getWidth(0, c_cross_shield_end)}" height="${y_floor - y_ceil}" fill="#2f3337" stroke="#1d2023" stroke-width="1"/>`;
 
   // Ceiling
-  const h_ceil_px = 24;
+  const h_ceil_px = 40;
   html += `<rect x="${getLeft(C_MIN, C_MAX)}" y="${y_ceil - h_ceil_px}" width="${getWidth(C_MIN, C_MAX)}" height="${h_ceil_px}" fill="#f4efe0" stroke="#9aa2ab" stroke-width="1.5"/>`;
-  html += `<text x="${getLeft(0, C_MAX) + 14}" y="${y_ceil - 7}" fill="#333" font-size="11" font-weight="700">CEILING (z = 2345 mm)</text>`;
+  const ceilTxtX = isSide ? getU(C_MAX) + 14 : getU(C_MAX) - 14;
+  html += `<text x="${ceilTxtX}" y="${y_ceil - 13}" fill="#333" font-size="${FS.label}" font-weight="700" text-anchor="${isSide ? 'start' : 'end'}">CEILING (z = 2345 mm)</text>`;
 
   // Subfloor
   const y_screed_bot = zToSvg(-GEOM.t_screed);
@@ -731,11 +776,12 @@ function renderElevation() {
 
   html += `<rect x="${getLeft(C_MIN, C_MAX)}" y="${y_floor}" width="${getWidth(C_MIN, C_MAX)}" height="${y_screed_bot - y_floor}" fill="#8c9298" stroke="#6c7278" stroke-width="1"/>`;
   html += `<rect x="${getLeft(0, state.w_floor_pad_mm)}" y="${y_floor - 10}" width="${getWidth(0, state.w_floor_pad_mm)}" height="12" fill="url(#firebrick-pat)" stroke="#a38f70" stroke-width="1.2"/>`;
-  html += `<text x="${getU(state.w_floor_pad_mm / 2)}" y="${y_screed_bot - 4}" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">STRUCTURAL SCREED + FIREBRICK PAD ZONE (w = ${state.w_floor_pad_mm} mm)</text>`;
   html += `<rect x="${getLeft(state.w_floor_pad_mm, C_MAX)}" y="${y_floor - 8}" width="${getWidth(state.w_floor_pad_mm, C_MAX)}" height="10" fill="#f3d55b" stroke="#c2a32b" stroke-width="1.2"/>`;
-  html += `<text x="${getU((state.w_floor_pad_mm + C_MAX)/2)}" y="${y_floor - 13}" fill="#7c650b" font-size="11" font-weight="700" text-anchor="middle">VINYL FLOOR</text>`;
   html += `<rect x="${getLeft(C_MIN, C_MAX)}" y="${y_screed_bot}" width="${getWidth(C_MIN, C_MAX)}" height="${y_vip_bot - y_screed_bot}" fill="#b02a37" stroke="#7a1c24" stroke-width="1"/>`;
-  html += `<text x="${getLeft(0, C_MAX) + 14}" y="${y_vip_bot - 3}" fill="#ffffff" font-size="10" font-weight="600">VIP SUBFLOOR INSULATION (20 mm)</text>`;
+  // Floor build-up captions below the slab
+  html += `<text x="${getU(state.w_floor_pad_mm / 2)}" y="${y_vip_bot + 50}" fill="#6b5a3e" font-size="${FS.small}" font-weight="700" text-anchor="middle">FIREBRICK PAD (${state.w_floor_pad_mm} mm)</text>`;
+  html += `<text x="${getU((state.w_floor_pad_mm + C_MAX) / 2)}" y="${y_vip_bot + 50}" fill="#7c650b" font-size="${FS.small}" font-weight="700" text-anchor="middle">VINYL</text>`;
+  html += `<text x="${getU((C_MIN + C_MAX) / 2)}" y="${y_vip_bot + 80}" fill="#333" font-size="${FS.small}" font-weight="600" text-anchor="middle"><tspan fill="#5c6268">SCREED 30 mm</tspan>  ·  <tspan fill="#8f1d29">VIP INSULATION 20 mm</tspan></text>`;
 
   // Buoyant Plume
   const p_k_l = getU(c_kiln + GEOM.r_kiln);
@@ -761,8 +807,14 @@ function renderElevation() {
   html += `<g id="hood-group">`;
   html += `<rect x="${getLeft(c_kiln - GEOM.d_hood_duct/2, c_kiln + GEOM.d_hood_duct/2)}" y="${y_ceil}" width="${GEOM.d_hood_duct * SCALE}" height="${y_hood_throat - y_ceil}" fill="url(#grad-hood)" stroke="#5c636a" stroke-width="1.5"/>`;
   html += `<polygon points="${d_l},${y_hood_throat} ${d_r},${y_hood_throat} ${p_h_r},${y_hood_inlet} ${p_h_l},${y_hood_inlet}" fill="url(#grad-hood)" stroke="#5c636a" stroke-width="1.5"/>`;
-  html += `<text x="${getU(c_kiln)}" y="${0.5*(y_hood_throat + y_hood_inlet) + 5}" fill="#1f242b" font-size="11" font-weight="700" text-anchor="middle">HOOD Ø${state.d_hood_inlet_mm} mm (${state.exhaust_fan_cfm} CFM)</text>`;
+  html += `<text x="${getU(c_kiln)}" y="${y_hood_inlet - 42}" fill="#06302b" font-size="${FS.label}" font-weight="800" text-anchor="middle">HOOD Ø${state.d_hood_inlet_mm}</text>`;
+  html += `<text x="${getU(c_kiln)}" y="${y_hood_inlet - 14}" fill="#06302b" font-size="${FS.small}" font-weight="700" text-anchor="middle">${state.exhaust_fan_cfm > 0 ? state.exhaust_fan_cfm + ' CFM' : 'FAN OFF'}</text>`;
   html += `</g>`;
+
+  // Wall labels (vertical, drawn above the plume so they stay readable)
+  const c_free_mid = 0.5 * (c_kiln + GEOM.r_kiln + c_shield_end);
+  html += vText(getU(c_free_mid), zToSvg(1450), bgShieldLbl, FS.label, '#f1f3f5', 'stroke="#2b2f33" stroke-width="4" paint-order="stroke"');
+  html += `<text x="${u_gyp_l + u_gyp_w / 2}" y="${zToSvg(980)}" fill="#4a4a4a" font-size="${FS.label}" font-weight="700" text-anchor="middle">EXPOSED GYPSUM</text>`;
 
   // Reflector
   const y_ref_top = zToSvg(z_ref_top) - 10;
@@ -797,46 +849,39 @@ function renderElevation() {
   const y_ssr_bot_px = zToSvg(z_ssr_bot);
   const u_ssr = getU(c_ssr);
   html += `<rect x="${getLeft(c_ssr - 27, c_ssr + 27)}" y="${y_ssr_top_px}" width="${54 * SCALE}" height="${y_ssr_bot_px - y_ssr_top_px}" fill="#ced4da" stroke="#343a40" stroke-width="1.5" rx="2"/>`;
-  html += `<text x="${u_ssr}" y="${0.5*(y_ssr_top_px + y_ssr_bot_px)}" fill="#212529" font-size="10" font-weight="700" text-anchor="middle" transform="rotate(-90, ${u_ssr}, ${0.5*(y_ssr_top_px + y_ssr_bot_px)})">SSR BOX</text>`;
+  html += `<text x="${u_ssr}" y="${0.5*(y_ssr_top_px + y_ssr_bot_px)}" fill="#212529" font-size="${FS.small}" font-weight="800" dominant-baseline="central" text-anchor="middle" transform="rotate(-90, ${u_ssr}, ${0.5*(y_ssr_top_px + y_ssr_bot_px)})">SSR BOX</text>`;
 
-  html += `<text x="${getU(c_kiln)}" y="${0.5*(y_drum_top_px + y_drum_bot) - 8}" fill="#1f242b" font-size="14" font-weight="800" text-anchor="middle">ROHDE ECOTOP 60</text>`;
-  html += `<text x="${getU(c_kiln)}" y="${0.5*(y_drum_top_px + y_drum_bot) + 12}" fill="#343a40" font-size="11" font-weight="600" text-anchor="middle">⇄ Drag Left / Right (s = ${state.s_kiln_mm} mm)</text>`;
+  html += `<text x="${getU(c_kiln)}" y="${0.5*(y_drum_top_px + y_drum_bot) - 14}" fill="#1f242b" font-size="${FS.big}" font-weight="800" text-anchor="middle">ROHDE ECOTOP 60</text>`;
+  html += `<text x="${getU(c_kiln)}" y="${0.5*(y_drum_top_px + y_drum_bot) + 20}" fill="#343a40" font-size="${FS.small}" font-weight="700" text-anchor="middle">⇄ drag to move</text>`;
   html += `</g>`;
 
-  const y_dim = 0.5 * (y_drum_top_px + y_drum_bot) + 45;
+  const y_dim = zToSvg(z_drum_bot + 110);
   const c_kiln_wall_edge = isSide ? c_kiln - GEOM.r_kiln : c_kiln - GEOM.r_kiln;
   html += `<line x1="${getU(c_kiln_wall_edge)}" y1="${y_dim}" x2="${getU(c_shield_start)}" y2="${y_dim}" stroke="#111" stroke-width="5"/>`;
   html += `<line x1="${getU(c_kiln_wall_edge)}" y1="${y_dim}" x2="${getU(c_shield_start)}" y2="${y_dim}" stroke="#ffe14d" stroke-width="2.5"/>`;
-  html += `<text x="${getU((c_kiln_wall_edge + c_shield_start)/2)}" y="${y_dim - 8}" fill="#ffe14d" stroke="#111" stroke-width="3.5" paint-order="stroke" font-size="13" font-weight="800" text-anchor="middle">${state.s_kiln_mm} mm</text>`;
+  html += `<text x="${getU((c_kiln_wall_edge + c_shield_start)/2)}" y="${y_dim - 10}" fill="#ffe14d" stroke="#111" stroke-width="5" paint-order="stroke" font-size="26" font-weight="800" text-anchor="middle">${state.s_kiln_mm} mm</text>`;
 
   // Sensors
   const c_ceil = c_kiln + (0.5 * state.d_hood_inlet_mm + 10) * Math.SQRT1_2;
   const c_pad_out = c_kiln + (r_shadow_near + 20) * Math.SQRT1_2;
 
   const sensors = [
-    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, c: c_ceil, y_px: y_ceil - 12, lbl_dx: isSide ? 50 : -50, lbl_dy: 28 },
-    { id: "gyp", label: isSide ? "Gypsum Max (Left)" : "Gypsum Max (Back)", temp: isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c, safe: (isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c) < LIMITS.gypsum, c: c_shield_end + 35, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum), lbl_dx: isSide ? 55 : -55, lbl_dy: -24 },
-    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, c: c_shield_start, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum), lbl_dx: isSide ? 70 : -70, lbl_dy: -22 },
-    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, c: -100, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) + 46, lbl_dx: isSide ? -38 : 38, lbl_dy: 4 },
-    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air && m.t_ssr_case_c < LIMITS.ssr_case, c: c_ssr, y_px: y_ssr_top_px + 24, lbl_dx: isSide ? 62 : -62, lbl_dy: -22 },
-    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, c: c_kiln - 24, y_px: y_floor - 4, lbl_dx: isSide ? 65 : -65, lbl_dy: -20 },
-    { id: "vip_under", label: "VIP Under Kiln Center", temp: m.t_vip_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, c: c_kiln + 24, y_px: 0.5 * (y_screed_bot + y_vip_bot) + 12, lbl_dx: isSide ? -30 : 30, lbl_dy: 24 },
-    { id: "pad_edge", label: "Pad Outside Reflector", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, c: c_pad_out - 18, y_px: y_floor - 4, lbl_dx: isSide ? 75 : -75, lbl_dy: -22 },
-    { id: "vip_out", label: "VIP Outside Reflector", temp: m.t_vip_outside_reflector_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, c: c_pad_out + 18, y_px: 0.5 * (y_screed_bot + y_vip_bot) + 12, lbl_dx: isSide ? 70 : -70, lbl_dy: 26 },
-    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, c: state.w_floor_pad_mm + 25, y_px: y_floor - 4, lbl_dx: isSide ? 45 : -45, lbl_dy: -24 }
+    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, c: c_ceil, y_px: y_ceil },
+    { id: "gyp", label: isSide ? "Gypsum Max (Left)" : "Gypsum Max (Back)", temp: isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c, safe: (isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c) < LIMITS.gypsum, c: c_shield_end + 35, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) },
+    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, c: c_shield_start, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) },
+    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, c: -100, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) + 46 },
+    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air && m.t_ssr_case_c < LIMITS.ssr_case, c: c_ssr, y_px: y_ssr_top_px + 24 },
+    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, c: c_kiln - 24, y_px: y_floor - 4 },
+    { id: "vip_under", label: "VIP Under Kiln Center", temp: m.t_vip_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, c: c_kiln + 24, y_px: 0.5 * (y_screed_bot + y_vip_bot) },
+    { id: "pad_edge", label: "Pad Outside Reflector", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, c: c_pad_out - 18, y_px: y_floor - 4 },
+    { id: "vip_out", label: "VIP Outside Reflector", temp: m.t_vip_outside_reflector_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, c: c_pad_out + 18, y_px: 0.5 * (y_screed_bot + y_vip_bot) },
+    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, c: state.w_floor_pad_mm + 25, y_px: y_floor - 4 }
   ];
 
-  for (const s of sensors) {
-    const ringColor = s.safe ? "#2ea043" : "#d93025";
-    const px = getU(s.c);
-    html += `<g class="sensor-node">`;
-    html += `<line x1="${px}" y1="${s.y_px}" x2="${px + s.lbl_dx * 0.45}" y2="${s.y_px + s.lbl_dy * 0.7}" stroke="#222" stroke-width="1.2"/>`;
-    html += `<circle cx="${px}" cy="${s.y_px}" r="18" fill="#111111" stroke="${ringColor}" stroke-width="3"/>`;
-    html += `<text x="${px}" y="${s.y_px + 4}" fill="#ffffff" font-size="10.5" font-weight="700" text-anchor="middle">${s.temp.toFixed(1)}°</text>`;
-    html += `<rect x="${px + s.lbl_dx - s.label.length * 3.1 - 5}" y="${s.y_px + s.lbl_dy - 12}" width="${s.label.length * 6.2 + 10}" height="16" rx="3" fill="rgba(255,255,255,0.92)" stroke="#ced4da" stroke-width="1"/>`;
-    html += `<text x="${px + s.lbl_dx}" y="${s.y_px + s.lbl_dy}" fill="#111" font-size="10.5" font-weight="700" text-anchor="middle">${s.label}</text>`;
-    html += `</g>`;
-  }
+  const U_L = getU(isSide ? C_MAX : C_MIN), U_R = getU(isSide ? C_MIN : C_MAX);
+  html += renderCallouts(sensors.map(s => ({ ...s, x: getU(s.c), y: s.y_px })),
+    { leftEdge: U_L, rightEdge: U_R, centerX: 0.5 * (U_L + U_R), top: y_ceil - 40, bottom: y_vip_bot + 22 });
+  svg.setAttribute('viewBox', `${U_L - 330} ${y_ceil - 70} ${U_R - U_L + 660} ${y_vip_bot + 100 - (y_ceil - 70)}`);
 
   svg.innerHTML = html;
   attachKilnDragHandler(svg);
@@ -873,16 +918,18 @@ function renderPlanView(svg, m) {
 
   // Vinyl Floor (Background)
   html += `<rect x="${px(0)}" y="${py(0)}" width="${1700*SCALE}" height="${1700*SCALE}" fill="#f3d55b" stroke="#c2a32b" stroke-width="1.2"/>`;
-  html += `<text x="${px(950)}" y="${py(1600)}" fill="#7c650b" font-size="14" font-weight="700" text-anchor="middle">VINYL FLOOR</text>`;
+  html += `<text x="${px(950)}" y="${py(1600)}" fill="#7c650b" font-size="${FS.big}" font-weight="700" text-anchor="middle">VINYL FLOOR</text>`;
 
   // Floor Pad
   html += `<rect x="${px(0)}" y="${py(0)}" width="${state.w_floor_pad_mm*SCALE}" height="${state.w_floor_pad_mm*SCALE}" fill="url(#firebrick-pat)" stroke="#a38f70" stroke-width="1.5"/>`;
 
+  html += `<text x="${px(state.w_floor_pad_mm / 2)}" y="${py(state.w_floor_pad_mm) - 16}" fill="#6b5a3e" font-size="${FS.small}" font-weight="700" text-anchor="middle">FIREBRICK PAD (${state.w_floor_pad_mm} mm)</text>`;
+
   // AAC Walls
   html += `<rect x="${px(-GEOM.t_aac)}" y="${py(-GEOM.t_aac)}" width="${(1700 + GEOM.t_aac)*SCALE}" height="${GEOM.t_aac*SCALE}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
   html += `<rect x="${px(-GEOM.t_aac)}" y="${py(0)}" width="${GEOM.t_aac*SCALE}" height="${1700*SCALE}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
-  html += `<text x="${px(850)}" y="${py(-100)}" fill="#3b4249" font-size="11" font-weight="700" text-anchor="middle">LEFT AAC WALL (215 mm)</text>`;
-  html += `<text x="${px(-100)}" y="${py(850)}" fill="#3b4249" font-size="11" font-weight="700" text-anchor="middle" transform="rotate(-90, ${px(-100)}, ${py(850)})">BACK AAC WALL (215 mm)</text>`;
+  html += `<text x="${px(1150)}" y="${py(-107.5)}" fill="#2d2440" font-size="${FS.label}" font-weight="700" text-anchor="middle" dominant-baseline="central">LEFT AAC WALL (215 mm)</text>`;
+  html += vText(px(-107.5), py(1350), 'BACK AAC WALL (215 mm)', FS.label, '#2d2440');
 
   // Exposed Gypsum
   html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left)}" y="${py(0)}" width="${(1700 - GEOM.d_chimney - GEOM.t_shield - GEOM.w_shield_left)*SCALE}" height="${GEOM.t_gypsum*SCALE}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
@@ -920,29 +967,20 @@ function renderPlanView(svg, m) {
   const r_shadow_near = r_ref + Math.max(0, r_ref - GEOM.r_kiln) * (dz_gap / dz_kiln_ref);
 
   const sensors = [
-    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln - r_ceil * Math.SQRT1_2, lbl_dx: -20, lbl_dy: -30 },
-    { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: m.t_gypsum_max_left_c < LIMITS.gypsum, x: GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left + 45, y: 12.5, lbl_dx: 0, lbl_dy: -25 },
-    { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: m.t_gypsum_max_back_c < LIMITS.gypsum, x: 12.5, y: GEOM.d_chimney + GEOM.w_shield_back + 45, lbl_dx: -65, lbl_dy: 25 },
-    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, x: x_kiln, y: 6, lbl_dx: 0, lbl_dy: -28 },
-    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, x: x_kiln, y: -100, lbl_dx: 0, lbl_dy: -28 },
-    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air, x: x_kiln + (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, y: y_kiln - (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, lbl_dx: 30, lbl_dy: -25 },
-    { id: "pad_under", label: "Pad Under Ref", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, x: x_kiln, y: y_kiln, lbl_dx: -30, lbl_dy: 30 },
-    { id: "pad_edge", label: "Pad Edge (Out)", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, x: x_kiln + (r_shadow_near + 20) * Math.SQRT1_2, y: y_kiln + (r_shadow_near + 20) * Math.SQRT1_2, lbl_dx: 30, lbl_dy: 25 },
-    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, x: state.w_floor_pad_mm + 25, y: y_kiln, lbl_dx: 25, lbl_dy: -25 }
+    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln - r_ceil * Math.SQRT1_2 },
+    { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: m.t_gypsum_max_left_c < LIMITS.gypsum, x: GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left + 45, y: 12.5 },
+    { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: m.t_gypsum_max_back_c < LIMITS.gypsum, x: 12.5, y: GEOM.d_chimney + GEOM.w_shield_back + 45 },
+    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, x: x_kiln, y: 6 },
+    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, x: x_kiln, y: -100 },
+    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air, x: x_kiln + (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, y: y_kiln - (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2 },
+    { id: "pad_under", label: "Pad Under Ref", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, x: x_kiln, y: y_kiln },
+    { id: "pad_edge", label: "Pad Edge (Out)", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, x: x_kiln + (r_shadow_near + 20) * Math.SQRT1_2, y: y_kiln + (r_shadow_near + 20) * Math.SQRT1_2 },
+    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, x: state.w_floor_pad_mm + 25, y: y_kiln }
   ];
 
-  for (const s of sensors) {
-    const ringColor = s.safe ? "#2ea043" : "#d93025";
-    const s_px = px(s.x);
-    const s_py = py(s.y);
-    html += `<g class="sensor-node">`;
-    html += `<line x1="${s_px}" y1="${s_py}" x2="${s_px + s.lbl_dx * 0.45}" y2="${s_py + s.lbl_dy * 0.7}" stroke="#222" stroke-width="1.2"/>`;
-    html += `<circle cx="${s_px}" cy="${s_py}" r="18" fill="#111111" stroke="${ringColor}" stroke-width="3"/>`;
-    html += `<text x="${s_px}" y="${s_py + 4}" fill="#ffffff" font-size="10.5" font-weight="700" text-anchor="middle">${s.temp.toFixed(1)}°</text>`;
-    html += `<rect x="${s_px + s.lbl_dx - s.label.length * 3.1 - 5}" y="${s_py + s.lbl_dy - 12}" width="${s.label.length * 6.2 + 10}" height="16" rx="3" fill="rgba(255,255,255,0.92)" stroke="#ced4da" stroke-width="1"/>`;
-    html += `<text x="${s_px + s.lbl_dx}" y="${s_py + s.lbl_dy}" fill="#111" font-size="10.5" font-weight="700" text-anchor="middle">${s.label}</text>`;
-    html += `</g>`;
-  }
+  html += renderCallouts(sensors.map(s => ({ ...s, x: px(s.x), y: py(s.y) })),
+    { leftEdge: px(-GEOM.t_aac), rightEdge: px(1700), centerX: px(x_kiln) + 1, top: py(-GEOM.t_aac), bottom: py(1700) });
+  svg.setAttribute('viewBox', `${px(-GEOM.t_aac) - 330} ${py(-GEOM.t_aac) - 20} ${(1700 + GEOM.t_aac) * SCALE + 660} ${(1700 + GEOM.t_aac) * SCALE + 40}`);
 
   svg.innerHTML = html;
   attachKilnDragHandler(svg);
