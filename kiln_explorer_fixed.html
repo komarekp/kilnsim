@@ -498,8 +498,11 @@ function getWidth(c1, c2) { return Math.abs(getU(c2) - getU(c1)); }
 // Plan View Maps
 const PLAN_ORIGIN_X = 140;
 const PLAN_ORIGIN_Y = 140;
+const Y_MAX_CANVAS_MM = 1700;
 function px(mm) { return PLAN_ORIGIN_X + mm * SCALE; }
-function py(mm) { return PLAN_ORIGIN_Y + mm * SCALE; }
+function py(mm) { return PLAN_ORIGIN_Y + (Y_MAX_CANVAS_MM - mm) * SCALE; }
+function pYTop(y_bottom, height_mm) { return py(y_bottom + height_mm); }
+function pHeight(height_mm) { return height_mm * SCALE; }
 
 // ---------- Text / callout helpers (graphical font sizes are 2x the original) ----------
 const FS = { small: 20, label: 22, big: 28 };
@@ -760,7 +763,7 @@ function renderElevation() {
 }
 
 function renderPlanView(svg, m) {
-  document.getElementById('header-subtitle').textContent = 'To-scale top-down plan view of the studio corner (Left wall runs along +x; Back wall runs along +y)';
+  document.getElementById('header-subtitle').textContent = 'To-scale top-down plan view of the studio corner (Back wall at x = 0 on left; Left wall at y = 0 at bottom)';
   document.getElementById('drag-hint-msg').textContent = '⤡ Drag the kiln diagonally to toggle between 200 mm and 300 mm wall standoffs';
 
   const x_kiln = GEOM.d_chimney + GEOM.t_shield + state.s_kiln_mm + GEOM.r_kiln;
@@ -788,27 +791,26 @@ function renderPlanView(svg, m) {
   `;
 
   // Vinyl Floor (Background)
-  html += `<rect x="${px(0)}" y="${py(0)}" width="${1700*SCALE}" height="${1700*SCALE}" fill="#f3d55b" stroke="#c2a32b" stroke-width="1.2"/>`;
-  html += `<text x="${px(950)}" y="${py(1600)}" fill="#7c650b" font-size="${FS.big}" font-weight="700" text-anchor="middle">VINYL FLOOR</text>`;
+  html += `<rect x="${px(0)}" y="${pYTop(0, 1700)}" width="${1700*SCALE}" height="${pHeight(1700)}" fill="#f3d55b" stroke="#c2a32b" stroke-width="1.2"/>`;
+  html += `<text x="${px(950)}" y="${py(1500)}" fill="#7c650b" font-size="${FS.big}" font-weight="700" text-anchor="middle">VINYL FLOOR</text>`;
 
   // Floor Pad
-  html += `<rect x="${px(0)}" y="${py(0)}" width="${state.w_floor_pad_mm*SCALE}" height="${state.w_floor_pad_mm*SCALE}" fill="url(#firebrick-pat)" stroke="#a38f70" stroke-width="1.5"/>`;
+  html += `<rect x="${px(0)}" y="${pYTop(0, state.w_floor_pad_mm)}" width="${state.w_floor_pad_mm*SCALE}" height="${pHeight(state.w_floor_pad_mm)}" fill="url(#firebrick-pat)" stroke="#a38f70" stroke-width="1.5"/>`;
+  html += `<text x="${px(state.w_floor_pad_mm / 2)}" y="${py(state.w_floor_pad_mm) + 26}" fill="#6b5a3e" font-size="${FS.small}" font-weight="700" text-anchor="middle">FIREBRICK PAD (${state.w_floor_pad_mm} mm)</text>`;
 
-  html += `<text x="${px(state.w_floor_pad_mm / 2)}" y="${py(state.w_floor_pad_mm) - 16}" fill="#6b5a3e" font-size="${FS.small}" font-weight="700" text-anchor="middle">FIREBRICK PAD (${state.w_floor_pad_mm} mm)</text>`;
+  // AAC Walls (Left wall at bottom y in [-GEOM.t_aac, 0]; Back wall at left x in [-GEOM.t_aac, 0])
+  html += `<rect x="${px(-GEOM.t_aac)}" y="${pYTop(-GEOM.t_aac, GEOM.t_aac)}" width="${(1700 + GEOM.t_aac)*SCALE}" height="${pHeight(GEOM.t_aac)}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
+  html += `<rect x="${px(-GEOM.t_aac)}" y="${pYTop(0, 1700)}" width="${GEOM.t_aac*SCALE}" height="${pHeight(1700)}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
+  html += `<text x="${px(1150)}" y="${py(-GEOM.t_aac / 2)}" fill="#2d2440" font-size="${FS.label}" font-weight="700" text-anchor="middle" dominant-baseline="central">LEFT AAC WALL (215 mm)</text>`;
+  html += vText(px(-GEOM.t_aac / 2), py(1350), 'BACK AAC WALL (215 mm)', FS.label, '#2d2440');
 
-  // AAC Walls
-  html += `<rect x="${px(-GEOM.t_aac)}" y="${py(-GEOM.t_aac)}" width="${(1700 + GEOM.t_aac)*SCALE}" height="${GEOM.t_aac*SCALE}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
-  html += `<rect x="${px(-GEOM.t_aac)}" y="${py(0)}" width="${GEOM.t_aac*SCALE}" height="${1700*SCALE}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
-  html += `<text x="${px(1150)}" y="${py(-107.5)}" fill="#2d2440" font-size="${FS.label}" font-weight="700" text-anchor="middle" dominant-baseline="central">LEFT AAC WALL (215 mm)</text>`;
-  html += vText(px(-107.5), py(1350), 'BACK AAC WALL (215 mm)', FS.label, '#2d2440');
-
-  // Exposed Gypsum
-  html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left)}" y="${py(0)}" width="${(1700 - GEOM.d_chimney - GEOM.t_shield - GEOM.w_shield_left)*SCALE}" height="${GEOM.t_gypsum*SCALE}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
-  html += `<rect x="${px(0)}" y="${py(GEOM.d_chimney + GEOM.w_shield_back)}" width="${GEOM.t_gypsum*SCALE}" height="${(1700 - GEOM.d_chimney - GEOM.w_shield_back)*SCALE}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
+  // Exposed Gypsum (Left wall at y=0, Back wall at x=0)
+  html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left)}" y="${pYTop(0, GEOM.t_gypsum)}" width="${(1700 - GEOM.d_chimney - GEOM.t_shield - GEOM.w_shield_left)*SCALE}" height="${pHeight(GEOM.t_gypsum)}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
+  html += `<rect x="${px(0)}" y="${pYTop(GEOM.d_chimney + GEOM.w_shield_back, 1700 - GEOM.d_chimney - GEOM.w_shield_back)}" width="${GEOM.t_gypsum*SCALE}" height="${pHeight(1700 - GEOM.d_chimney - GEOM.w_shield_back)}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
 
   // Heat Shields (Corner Butt-Joint)
-  html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield)}" y="${py(GEOM.d_chimney)}" width="${GEOM.w_shield_left*SCALE}" height="${GEOM.t_shield*SCALE}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
-  html += `<rect x="${px(GEOM.d_chimney)}" y="${py(GEOM.d_chimney)}" width="${GEOM.t_shield*SCALE}" height="${GEOM.w_shield_back*SCALE}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
+  html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield)}" y="${pYTop(GEOM.d_chimney, GEOM.t_shield)}" width="${GEOM.w_shield_left*SCALE}" height="${pHeight(GEOM.t_shield)}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
+  html += `<rect x="${px(GEOM.d_chimney)}" y="${pYTop(GEOM.d_chimney, GEOM.w_shield_back)}" width="${GEOM.t_shield*SCALE}" height="${pHeight(GEOM.w_shield_back)}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
 
   // Reflector
   html += `<circle cx="${px(x_kiln)}" cy="${py(y_kiln)}" r="${r_ref * SCALE}" fill="url(#grad-ss)" stroke="#495057" stroke-width="1"/>`;
@@ -821,8 +823,10 @@ function renderPlanView(svg, m) {
   html += `<g id="kiln-draggable" class="draggable-kiln plan-drag">`;
   html += `<circle class="kiln-outline" cx="${px(x_kiln)}" cy="${py(y_kiln)}" r="${(GEOM.r_kiln + 4)*SCALE}" fill="url(#grad-ss)" stroke="#343a40" stroke-width="2"/>`;
   
-  // SSR Box (at -45 deg)
-  html += `<g transform="rotate(-45, ${px(x_kiln)}, ${py(y_kiln)})">`;
+  // SSR Box (facing front-left: toward +x, angled away from left wall)
+  // In flipped coordinates where +y goes up, standard angle theta=-45 deg corresponds to (cos(-45)=+0.707, sin(-45)=-0.707)
+  // SVG clockwise rotation by +45 deg rotates vector (+1, 0) into (+x, -y screen / down).
+  html += `<g transform="rotate(45, ${px(x_kiln)}, ${py(y_kiln)})">`;
   html += `<rect x="${px(x_kiln + GEOM.r_kiln)}" y="${py(y_kiln) - GEOM.w_ssr/2 * SCALE}" width="${GEOM.d_ssr * SCALE}" height="${GEOM.w_ssr * SCALE}" fill="#ced4da" stroke="#343a40" stroke-width="1.5" rx="2"/>`;
   html += `</g>`;
 
@@ -838,25 +842,32 @@ function renderPlanView(svg, m) {
   const r_shadow_near = r_ref + Math.max(0, r_ref - GEOM.r_kiln) * (dz_gap / dz_kiln_ref);
 
   const sensors = [
-    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln - r_ceil * Math.SQRT1_2 },
+    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln + r_ceil * Math.SQRT1_2 },
     { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: m.t_gypsum_max_left_c < LIMITS.gypsum, x: GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left + 45, y: 12.5 },
     { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: m.t_gypsum_max_back_c < LIMITS.gypsum, x: 12.5, y: GEOM.d_chimney + GEOM.w_shield_back + 45 },
     { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, x: x_kiln, y: 6 },
     { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, x: x_kiln, y: -100 },
     { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air, x: x_kiln + (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, y: y_kiln - (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2 },
-    { id: "pad_under", label: "Pad Under Ref", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, x: x_kiln, y: y_kiln },
+    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, x: x_kiln, y: y_kiln },
     { id: "pad_edge", label: "Pad At Reflector Edge", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, x: x_kiln + (r_shadow_near + 20) * Math.SQRT1_2, y: y_kiln + (r_shadow_near + 20) * Math.SQRT1_2 },
     { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, x: state.w_floor_pad_mm + 25, y: y_kiln }
   ];
 
+  // Boundaries in SVG pixels:
+  // x from px(-GEOM.t_aac) to px(1700)
+  // y from py(1700) (top screen) to py(-GEOM.t_aac) (bottom screen)
+  const y_top_screen = py(1700);
+  const y_bottom_screen = py(-GEOM.t_aac);
+
   html += renderCallouts(sensors.map(s => ({ ...s, x: px(s.x), y: py(s.y) })),
-    { leftEdge: px(-GEOM.t_aac), rightEdge: px(1700), centerX: px(x_kiln) + 1, top: py(-GEOM.t_aac), bottom: py(1700) });
-  svg.setAttribute('viewBox', `${px(-GEOM.t_aac) - 330} ${py(-GEOM.t_aac) - 20} ${(1700 + GEOM.t_aac) * SCALE + 660} ${(1700 + GEOM.t_aac) * SCALE + 40}`);
+    { leftEdge: px(-GEOM.t_aac), rightEdge: px(1700), centerX: px(x_kiln) + 1, top: y_top_screen, bottom: y_bottom_screen });
+  svg.setAttribute('viewBox', `${px(-GEOM.t_aac) - 330} ${y_top_screen - 20} ${(1700 + GEOM.t_aac) * SCALE + 660} ${(1700 + GEOM.t_aac) * SCALE + 40}`);
 
   svg.innerHTML = html;
   attachKilnDragHandler(svg);
   renderSidebarMetrics(m);
 }
+
 
 function renderSidebarMetrics(m) {
   document.getElementById('plume-summary').textContent =
@@ -960,7 +971,10 @@ function attachKilnDragHandler(svg) {
     } else if (state.view === 'front') {
       c_kiln = C_MIN + (svgP.x - PAD_LEFT_PX) / SCALE;
     } else {
-      c_kiln = (svgP.x - PLAN_ORIGIN_X) / SCALE;
+      // In plan view, average the diagonal displacement along x and y (+y goes up)
+      const c_x = (svgP.x - PLAN_ORIGIN_X) / SCALE;
+      const c_y = Y_MAX_CANVAS_MM - (svgP.y - PLAN_ORIGIN_Y) / SCALE;
+      c_kiln = 0.5 * (c_x + c_y);
     }
     
     const standoff_mm = c_kiln - GEOM.t_shield - GEOM.r_kiln - GEOM.d_chimney;
