@@ -392,7 +392,9 @@ const LIMITS = {
   ceiling: 40.0,
   ssr_air: 35.0,
   ssr_case: 45.0,
-  vip: 50.0,
+  pad: 60.0,
+  calsil: 80.0,
+  vip: 60.0,
   vinyl: 45.0
 };
 
@@ -845,11 +847,11 @@ function renderPlanView(svg, m) {
     { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln + r_ceil * Math.SQRT1_2 },
     { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: m.t_gypsum_max_left_c < LIMITS.gypsum, x: GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left + 45, y: 12.5 },
     { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: m.t_gypsum_max_back_c < LIMITS.gypsum, x: 12.5, y: GEOM.d_chimney + GEOM.w_shield_back + 45 },
-    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, x: x_kiln, y: 6 },
+    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: m.t_shield_max_c < LIMITS.calsil, x: x_kiln, y: 6 },
     { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, x: x_kiln, y: -100 },
     { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air, x: x_kiln + (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, y: y_kiln - (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2 },
-    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, x: x_kiln, y: y_kiln },
-    { id: "pad_edge", label: "Pad At Reflector Edge", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, x: x_kiln + (r_shadow_near + 20) * Math.SQRT1_2, y: y_kiln + (r_shadow_near + 20) * Math.SQRT1_2 },
+    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.pad, x: x_kiln, y: y_kiln },
+    { id: "pad_edge", label: "Pad At Reflector Edge", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.pad, x: x_kiln + (r_shadow_near + 20) * Math.SQRT1_2, y: y_kiln + (r_shadow_near + 20) * Math.SQRT1_2 },
     { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, x: state.w_floor_pad_mm + 25, y: y_kiln }
   ];
 
