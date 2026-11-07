@@ -254,48 +254,48 @@
   </div>
 
   <div class="control-group">
-    <label>Kiln Wall Standoff <span class="val" id="lbl-skiln">200 mm</span></label>
+    <label>Kiln Wall Standoff <span class="val" id="lbl-skiln">300 mm</span></label>
     <div class="btn-group" id="ctrl-skiln">
-      <button class="active" data-val="200">200 mm</button>
-      <button data-val="300">300 mm</button>
+      <button data-val="200">200 mm</button>
+      <button class="active" data-val="300">300 mm</button>
     </div>
   </div>
 
   <div class="control-group">
-    <label>Exhaust Fan Flow <span class="val" id="lbl-fan">0 CFM</span></label>
+    <label>Exhaust Fan Flow <span class="val" id="lbl-fan">400 CFM</span></label>
     <div class="btn-group" id="ctrl-fan">
-      <button class="active" data-val="0">Off (0)</button>
+      <button data-val="0">Off (0)</button>
       <button data-val="350">350</button>
-      <button data-val="400">400</button>
+      <button class="active" data-val="400">400</button>
       <button data-val="450">450</button>
     </div>
   </div>
 
   <div class="control-group">
-    <label>Canopy Hood Width <span class="val" id="lbl-hood">600 mm</span></label>
+    <label>Canopy Hood Width <span class="val" id="lbl-hood">800 mm</span></label>
     <div class="btn-group" id="ctrl-hood">
-      <button class="active" data-val="600">600</button>
+      <button data-val="600">600</button>
       <button data-val="700">700</button>
-      <button data-val="800">800</button>
+      <button class="active" data-val="800">800</button>
     </div>
   </div>
 
   <div class="control-group">
-    <label>Reflector Diameter <span class="val" id="lbl-dref">700 mm</span></label>
+    <label>Reflector Diameter <span class="val" id="lbl-dref">800 mm</span></label>
     <div class="btn-group" id="ctrl-dref">
-      <button class="active" data-val="700">700</button>
-      <button data-val="800">800</button>
+      <button data-val="700">700</button>
+      <button class="active" data-val="800">800</button>
       <button data-val="900">900</button>
       <button data-val="1000">1000</button>
     </div>
   </div>
 
   <div class="control-group">
-    <label>Reflector Air Gap <span class="val" id="lbl-gref">0 mm</span></label>
+    <label>Reflector Air Gap <span class="val" id="lbl-gref">10 mm</span></label>
     <div class="btn-group" id="ctrl-gref">
-      <button class="active" data-val="0">0 mm</button>
+      <button data-val="0">0 mm</button>
       <button data-val="5">5 mm</button>
-      <button data-val="10">10 mm</button>
+      <button class="active" data-val="10">10 mm</button>
       <button data-val="20">20 mm</button>
     </div>
   </div>
@@ -317,10 +317,10 @@
   </div>
 
   <div class="control-group">
-    <label>Door Open Width <span class="val" id="lbl-door">0 mm</span></label>
+    <label>Door Open Width <span class="val" id="lbl-door">150 mm</span></label>
     <div class="btn-group" id="ctrl-door">
-      <button class="active" data-val="0">0 mm</button>
-      <button data-val="150">150 mm</button>
+      <button data-val="0">0 mm</button>
+      <button class="active" data-val="150">150 mm</button>
       <button data-val="800">800 mm</button>
     </div>
   </div>
@@ -400,14 +400,14 @@ const LIMITS = {
 
 const state = {
   view: 'plan', // 'side', 'front', or 'plan'
-  s_kiln_mm: 200,
-  exhaust_fan_cfm: 0,
-  d_hood_inlet_mm: 600,
-  d_reflector_mm: 700,
-  g_floor_reflector_mm: 0,
+  s_kiln_mm: 300,
+  exhaust_fan_cfm: 400,
+  d_hood_inlet_mm: 800,
+  d_reflector_mm: 800,
+  g_floor_reflector_mm: 10,
   t_reflector_calsil_mm: 0,
   w_floor_pad_mm: 1200,
-  w_door_open_mm: 0
+  w_door_open_mm: 150
 };
 
 function enforceValidReflectorCombo(changedKey) {
