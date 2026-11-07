@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rohde Ecotop 60 — Corner Thermal &amp; Airflow Simulation (`kilnsim`)</title>
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --panel: #ffffff;
+      --text: #1f242b;
+      --muted: #5e6773;
+      --border: #d8dde3;
+      --accent: #006ab1;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    header {
+      background: #1b222c;
+      color: #ffffff;
+      padding: 18px 24px;
+      border-bottom: 3px solid var(--accent);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 600;
+      max-width: 820px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    main {
+      max-width: 820px;
+      margin: 32px auto;
+      padding: 28px 32px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    p.overview {
+      font-size: 1.05rem;
+      margin-top: 0;
+      margin-bottom: 24px;
+    }
+    ul.resource-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    ul.resource-list li {
+      padding: 14px 0;
+      border-top: 1px solid var(--border);
+    }
+    ul.resource-list li a {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--accent);
+      text-decoration: none;
+    }
+    ul.resource-list li a:hover {
+      text-decoration: underline;
+    }
+    ul.resource-list li .desc {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rohde Ecotop 60 — Corner Thermal &amp; Airflow Simulation</h1>
+  </header>
+  <main>
+    <p class="overview">
+      This repository models the steady-state radiative, convective, conductive, and buoyant-plume heat transfer of a Rohde Ecotop 60 pottery kiln installed in a masonry studio corner. It evaluates wall standoffs, radiation shields, floor insulation pads, and exhaust hood ventilation across 3,456 parameter combinations to ensure surrounding building materials remain within safe temperature limits.
+    </p>
+    <ul class="resource-list">
+      <li>
+        <a href="kiln_explorer.html">Interactive Corner Thermal Explorer (`kiln_explorer.html`)</a>
+        <div class="desc">Interactive web visualization of all 3,456 simulated configurations with top-down plan and side-elevation views of temperatures and airflow.</div>
+      </li>
+      <li>
+        <a href="thermal_maths.pdf">Thermal &amp; Plume Physics Model (`thermal_maths.pdf`)</a>
+        <div class="desc">Mathematical formulation of the coupled radiative view-factor network, 1D conductive stacks, natural convection correlations, and buoyant exhaust plume equations.</div>
+      </li>
+      <li>
+        <a href="software_implementation.pdf">Software Architecture &amp; Implementation Plan (`software_implementation.pdf`)</a>
+        <div class="desc">Design specification detailing the Protocol Buffer schemas, surface mesh representation, numerical solvers, and Bazel build structure.</div>
+      </li>
+    </ul>
+  </main>
+</body>
+</html>
+
