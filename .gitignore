@@ -1,7 +1,7 @@
-bazel-bin/
-bazel-kilnsim/
-bazel-out/
-bazel-testlogs/
+bazel-bin
+bazel-kilnsim
+bazel-out
+bazel-testlogs
 #*
 *~
 *.lock
