@@ -1,0 +1,18 @@
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{ragged2e}
+\usepackage{etoolbox}
+
+% Allow Pandoc's longtable cells to break cleanly, use smaller font, and align ragged-right
+\AtBeginEnvironment{longtable}{%
+  \small%
+  \RaggedRight%
+}
+
+% Ensure monospace code spans / identifiers do NOT hyphenate words
+% \texttt typically disables hyphenation, but \hyphenchar\font=-1 guarantees zero hyphenation in verbatim/code
+\appto{\ttfamily}{\hyphenchar\font=-1}
+
+% Ensure math boxes don't overflow table columns
+\sloppy

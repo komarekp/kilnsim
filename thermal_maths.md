@@ -89,115 +89,115 @@ The studio subfloor below $z = 0$ consists of a 150 mm structural concrete slab,
 
 ### 3.1 Wall, Shield & Chimney Parameters
 
-| Symbol | Parameter Name | Baseline Default | Valid Range | Units | Physical Role & Model Validity Limits |
-| --- | --- | --- | --- | --- | --- |
-| $W\_{\text{shield,left}}$ | `w_shield_left_mm` | 800.0 | $\ge 200.0$ | mm | Width of Calsil shield along left wall (+x axis) from corner. |
-| $W\_{\text{shield,back}}$ | `w_shield_back_mm` | 800.0 | $\ge 200.0$ | mm | Width of Calsil shield along back wall (+y axis) from corner. |
-| $g\_{\text{floor}}$ | `g_floor_mm` | 50.0 | $\ge 0.0$ | mm | Inlet air gap between screed ($z = 0$) and bottom edge of shield. 0 mm simulates a floor-sealed cavity. |
-| $g\_{\text{ceil}}$ | `g_ceil_mm` | 50.0 | $\ge 0.0$ | mm | Outlet air gap between top edge of shield and ceiling ($z = H\_{\text{wall}}$). 0 mm simulates a ceiling-sealed cavity. |
-| $d\_{\text{chimney}}$ | `d_chimney_mm` | 25.0 | 0.0 to 100.0 | mm | Air gap between bare AAC block and shield back face. 0 mm simulates flush solid mounting with direct conduction. |
-| $t\_{\text{shield}}$ | `t_shield_mm` | 20.0 | $\ge 10.0$ | mm | Thickness of Promatect-H calcium silicate board. |
-| $f\_{\text{block}}$ | `chimney_blockage_fraction` | 0.08 | 0.0 to 1.0 | -- | Fraction of chimney cross-section obstructed by vertical mounting battens. |
-| $\text{seal}\_{\text{sides}}$ | `seal_chimney_sides` | `true` | `true` / `false` | bool | If `true`, vertical outer edges are sealed; if `false`, lateral room air entrains through side slot. |
-| $H\_{\text{wall}}$ | `h_wall_mm` | 2345.0 | $\ge 1800.0$ | mm | Total interior wall height from structural screed ($z = 0$) to ceiling. |
-| $t\_{\text{aac}}$ | `t_aac_mm` | 215.0 | $\ge 100.0$ | mm | Thickness of Airtec aerated concrete block wall. |
-| $t\_{\text{gypsum}}$ | `t_gypsum_mm` | 12.5 | $\ge 9.5$ | mm | Thickness of Class A2 gypsum plasterboard outside shield zone. |
+| Parameter (`config_field`) | Baseline Default | Valid Range | Units | Physical Role & Model Validity Limits |
+|:--------------------------|:-----------------|:------------|:------|:---------------------------------------------------------------------------------------------------|
+| $W\_{\text{shield,left}}$ \newline `w_shield_left_mm` | 800.0 | $\ge 200.0$ | mm | Width of Calsil shield along left wall (+x axis) from corner. |
+| $W\_{\text{shield,back}}$ \newline `w_shield_back_mm` | 800.0 | $\ge 200.0$ | mm | Width of Calsil shield along back wall (+y axis) from corner. |
+| $g\_{\text{floor}}$ \newline `g_floor_mm` | 50.0 | $\ge 0.0$ | mm | Inlet air gap between screed ($z = 0$) and bottom edge of shield. 0 mm simulates a floor-sealed cavity. |
+| $g\_{\text{ceil}}$ \newline `g_ceil_mm` | 50.0 | $\ge 0.0$ | mm | Outlet air gap between top edge of shield and ceiling ($z = H\_{\text{wall}}$). 0 mm simulates a ceiling-sealed cavity. |
+| $d\_{\text{chimney}}$ \newline `d_chimney_mm` | 25.0 | 0.0 to 100.0 | mm | Air gap between bare AAC block and shield back face. 0 mm simulates flush solid mounting with direct conduction. |
+| $t\_{\text{shield}}$ \newline `t_shield_mm` | 20.0 | $\ge 10.0$ | mm | Thickness of Promatect-H calcium silicate board. |
+| $f\_{\text{block}}$ \newline `chimney_blockage_fraction` | 0.08 | 0.0 to 1.0 | -- | Fraction of chimney cross-section obstructed by vertical mounting battens. |
+| $\text{seal}\_{\text{sides}}$ \newline `seal_chimney_sides` | `true` | `true` / `false` | bool | If `true`, vertical outer edges are sealed; if `false`, lateral room air entrains through side slot. |
+| $H\_{\text{wall}}$ \newline `h_wall_mm` | 2345.0 | $\ge 1800.0$ | mm | Total interior wall height from structural screed ($z = 0$) to ceiling. |
+| $t\_{\text{aac}}$ \newline `t_aac_mm` | 215.0 | $\ge 100.0$ | mm | Thickness of Airtec aerated concrete block wall. |
+| $t\_{\text{gypsum}}$ \newline `t_gypsum_mm` | 12.5 | $\ge 9.5$ | mm | Thickness of Class A2 gypsum plasterboard outside shield zone. |
 
 ### 3.2 Kiln, Bung & SSR Parameters
 
-| Symbol | Parameter Name | Baseline Default | Valid Range | Units | Physical Role & Model Validity Limits |
-| --- | --- | --- | --- | --- | --- |
-| $s\_{\text{kiln,left}}$ | `s_kiln_left_mm` | 205.0 | $\ge 100.0$ | mm | Clear horizontal standoff from left shield front face to kiln jacket. |
-| $s\_{\text{kiln,back}}$ | `s_kiln_back_mm` | 205.0 | $\ge 100.0$ | mm | Clear horizontal standoff from back shield front face to kiln jacket. |
-| $D\_{\text{kiln}}$ | `d_kiln_mm` | 700.0 | 400.0 to 1200.0 | mm | Outer diameter of stainless steel kiln cylinder jacket. |
-| $H\_{\text{drum}}$ | `h_drum_mm` | 580.0 | 300.0 to 1000.0 | mm | Height of main kiln cylinder body excluding lid. |
-| $t\_{\text{lid}}$ | `t_lid_mm` | 105.0 | 50.0 to 200.0 | mm | Thickness of closed refractory kiln lid. |
-| $h\_{\text{kiln\_base}}$ | `h_kiln_base_mm` | 210.0 | $\ge 50.0$ | mm | Clear height from floor pad top ($z\_{\text{pad,top}}$) to kiln drum bottom plate. |
-| $T\_{\text{int}}$ | `t_internal_c` | 1280.0 | 800.0 to 1350.0 |  deg C | Steady-state internal firing temperature (Cone 10 firing). |
-| $U\_{\text{kiln,side}}$ | `u_kiln_side` | 0.80 | 0.40 to 2.50 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of composite kiln wall ($0.80\ \text{W/m}^2\text{K}$ gives $\sim 155^\circ\text{C}$ skin). |
-| $U\_{\text{kiln,top}}$ | `u_kiln_top` | 2.00 | 0.80 to 4.00 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of unbacked refractory brick lid. |
-| $U\_{\text{kiln,bot}}$ | `u_kiln_bot` | 2.00 | 0.80 to 4.00 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of kiln bottom floor slab. |
-| $\theta\_{\text{bung}}$ | `bung_angle_deg` | 0.0 | -180.0 to 180.0 | deg | Azimuthal angle of exhaust bung ($0^\circ$ faces sliding doors along +x). |
-| $r\_{\text{bung}}$ | `r_bung_mm` | 415.0 | $\ge D\_{\text{kiln}}/2$ | mm | Radial distance from kiln axis to dilution cup center. |
-| $z\_{\text{bung\_offset}}$ | `z_bung_offset_mm` | 540.0 | 0.0 to $H\_{\text{drum}}$ | mm | Vertical height from kiln bottom plate to open top rim of dilution cup. |
-| $\text{bung}\_{\text{cap}}$ | `bung_captured` | `false` | `true` / `false` | bool | If `true`, bung exhaust is captured directly into duct ($0\text{ W}$ room load). |
-| $\dot{Q}\_{\text{bung}}$ | `q_bung_open_w` | 110.0 | 0.0 to 500.0 | W | Sensible convective heat release rate exiting open exhaust bung. |
-| $\theta\_{\text{SSR}}$ | `ssr_angle_deg` | -45.0 | -180.0 to 180.0 | deg | Azimuthal mounting angle of SSR box ($-45^\circ$ faces front-left quadrant). |
-| $z\_{\text{SSR\_offset}}$ | `z_ssr_offset_mm` | 100.0 | 0.0 to $H\_{\text{drum}}$ | mm | Vertical distance from kiln bottom plate to bottom face of SSR enclosure. |
-| $W\_{\text{SSR}}$ | `w_ssr_mm` | 190.0 | 100.0 to 350.0 | mm | Tangential width across outer back face of SSR enclosure. |
-| $D\_{\text{SSR}}$ | `d_ssr_mm` | 146.5 | 50.0 to 250.0 | mm | Depth of flat side flanges from kiln jacket to outer back face. |
-| $H\_{\text{SSR}}$ | `h_ssr_mm` | 430.0 | 200.0 to 600.0 | mm | Vertical height of louvered SSR enclosure. |
-| $\dot{Q}\_{\text{SSR,int}}$ | `q_ssr_internal_w` | 18.8 | 0.0 to 50.0 | W | Internal relay Joule heating dissipation ($15.7\text{ A} \times 1.2\text{ V}$). |
+| Parameter (`config_field`) | Baseline Default | Valid Range | Units | Physical Role & Model Validity Limits |
+|:--------------------------|:-----------------|:------------|:------|:---------------------------------------------------------------------------------------------------|
+| $s\_{\text{kiln,left}}$ \newline `s_kiln_left_mm` | 205.0 | $\ge 100.0$ | mm | Clear horizontal standoff from left shield front face to kiln jacket. |
+| $s\_{\text{kiln,back}}$ \newline `s_kiln_back_mm` | 205.0 | $\ge 100.0$ | mm | Clear horizontal standoff from back shield front face to kiln jacket. |
+| $D\_{\text{kiln}}$ \newline `d_kiln_mm` | 700.0 | 400.0 to 1200.0 | mm | Outer diameter of stainless steel kiln cylinder jacket. |
+| $H\_{\text{drum}}$ \newline `h_drum_mm` | 580.0 | 300.0 to 1000.0 | mm | Height of main kiln cylinder body excluding lid. |
+| $t\_{\text{lid}}$ \newline `t_lid_mm` | 105.0 | 50.0 to 200.0 | mm | Thickness of closed refractory kiln lid. |
+| $h\_{\text{kiln\_base}}$ \newline `h_kiln_base_mm` | 210.0 | $\ge 50.0$ | mm | Clear height from floor pad top ($z\_{\text{pad,top}}$) to kiln drum bottom plate. |
+| $T\_{\text{int}}$ \newline `t_internal_c` | 1280.0 | 800.0 to 1350.0 | deg C | Steady-state internal firing temperature (Cone 10 firing). |
+| $U\_{\text{kiln,side}}$ \newline `u_kiln_side` | 0.80 | 0.40 to 2.50 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of composite kiln wall ($0.80\ \text{W/m}^2\text{K}$ gives $\sim 155^\circ\text{C}$ skin). |
+| $U\_{\text{kiln,top}}$ \newline `u_kiln_top` | 2.00 | 0.80 to 4.00 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of unbacked refractory brick lid. |
+| $U\_{\text{kiln,bot}}$ \newline `u_kiln_bot` | 2.00 | 0.80 to 4.00 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of kiln bottom floor slab. |
+| $\theta\_{\text{bung}}$ \newline `bung_angle_deg` | 0.0 | -180.0 to 180.0 | deg | Azimuthal angle of exhaust bung ($0^\circ$ faces sliding doors along +x). |
+| $r\_{\text{bung}}$ \newline `r_bung_mm` | 415.0 | $\ge D\_{\text{kiln}}/2$ | mm | Radial distance from kiln axis to dilution cup center. |
+| $z\_{\text{bung\_offset}}$ \newline `z_bung_offset_mm` | 540.0 | 0.0 to $H\_{\text{drum}}$ | mm | Vertical height from kiln bottom plate to open top rim of dilution cup. |
+| $\text{bung}\_{\text{cap}}$ \newline `bung_captured` | `false` | `true` / `false` | bool | If `true`, bung exhaust is captured directly into duct ($0\text{ W}$ room load). |
+| $\dot{Q}\_{\text{bung}}$ \newline `q_bung_open_w` | 110.0 | 0.0 to 500.0 | W | Sensible convective heat release rate exiting open exhaust bung. |
+| $\theta\_{\text{SSR}}$ \newline `ssr_angle_deg` | -45.0 | -180.0 to 180.0 | deg | Azimuthal mounting angle of SSR box ($-45^\circ$ faces front-left quadrant). |
+| $z\_{\text{SSR\_offset}}$ \newline `z_ssr_offset_mm` | 100.0 | 0.0 to $H\_{\text{drum}}$ | mm | Vertical distance from kiln bottom plate to bottom face of SSR enclosure. |
+| $W\_{\text{SSR}}$ \newline `w_ssr_mm` | 190.0 | 100.0 to 350.0 | mm | Tangential width across outer back face of SSR enclosure. |
+| $D\_{\text{SSR}}$ \newline `d_ssr_mm` | 146.5 | 50.0 to 250.0 | mm | Depth of flat side flanges from kiln jacket to outer back face. |
+| $H\_{\text{SSR}}$ \newline `h_ssr_mm` | 430.0 | 200.0 to 600.0 | mm | Vertical height of louvered SSR enclosure. |
+| $\dot{Q}\_{\text{SSR,int}}$ \newline `q_ssr_internal_w` | 18.8 | 0.0 to 50.0 | W | Internal relay Joule heating dissipation ($15.7\text{ A} \times 1.2\text{ V}$). |
 
 ### 3.3 Floor, Subfloor VIP & Reflector Parameters
 
-| Symbol | Parameter Name | Baseline Default | Valid Range | Units | Physical Role & Model Validity Limits |
-| --- | --- | --- | --- | --- | --- |
-| $D\_{\text{reflector}}$ | `d_reflector_mm` | 730.0 | 500.0 to 1200.0 | mm | Outer diameter of circular polished stainless steel + CalSil floor reflector. |
-| $t\_{\text{reflector}}$ | `t_reflector_calsil_mm` | 20.0 | $\ge 0.0$ | mm | Thickness of CalSil backing inside circular reflector (0 mm for bare sheet). |
-| $g\_{\text{floor\_reflector}}$ | `g_floor_reflector_mm` | 15.0 | $\ge 0.0$ | mm | Air gap beneath reflector pan formed by spacer feet (0 mm for flush contact). |
-| $W\_{\text{floor\_pad}}$ | `w_floor_pad_mm` | 1000.0 | $\ge x\_k + R\_{\text{kiln}}$ | mm | Side width of square non-vinyl topping pad in corner ($0 \le x, y \le W\_{\text{floor\_pad}}$). |
-| $t\_{\text{floor\_pad}}$ | `t_floor_pad_mm` | 20.0 | $\ge 0.0$ | mm | Thickness of concrete or tile topping pad above screed datum $z = 0$. |
-| $t\_{\text{screed}}$ | `t_screed_mm` | 30.0 | 20.0 to 100.0 | mm | Thickness of fiber-reinforced structural screed layer. |
-| $t\_{\text{vip}}$ | `t_vip_mm` | 20.0 | 10.0 to 50.0 | mm | Thickness of Vacuum Insulation Panel (VIP) subfloor layer. |
-| $k\_{\text{vip}}$ | `k_vip` | 0.007 | 0.004 to 0.010 | $\text{W/m}\cdot\text{K}$ | Center-of-panel thermal conductivity of subfloor VIP layer ($R\_{\text{vip}} = t\_{\text{vip}} / k\_{\text{vip}}$). |
-| $k\_{\text{pad}}$ | `k_pad` | 1.40 | 0.80 to 2.50 | $\text{W/m}\cdot\text{K}$ | Thermal conductivity of concrete or porcelain tile floor pad. |
-| $k\_{\text{screed}}$ | `k_screed` | 1.20 | 0.80 to 1.80 | $\text{W/m}\cdot\text{K}$ | Thermal conductivity of fiber-reinforced floor screed. |
+| Parameter (`config_field`) | Baseline Default | Valid Range | Units | Physical Role & Model Validity Limits |
+|:--------------------------|:-----------------|:------------|:------|:---------------------------------------------------------------------------------------------------|
+| $D\_{\text{reflector}}$ \newline `d_reflector_mm` | 730.0 | 500.0 to 1200.0 | mm | Outer diameter of circular polished stainless steel + CalSil floor reflector. |
+| $t\_{\text{reflector}}$ \newline `t_reflector_calsil_mm` | 20.0 | $\ge 0.0$ | mm | Thickness of CalSil backing inside circular reflector (0 mm for bare sheet). |
+| $g\_{\text{floor\_reflector}}$ \newline `g_floor_reflector_mm` | 15.0 | $\ge 0.0$ | mm | Air gap beneath reflector pan formed by spacer feet (0 mm for flush contact). |
+| $W\_{\text{floor\_pad}}$ \newline `w_floor_pad_mm` | 1000.0 | $\ge x\_k + R\_{\text{kiln}}$ | mm | Side width of square non-vinyl topping pad in corner ($0 \le x, y \le W\_{\text{floor\_pad}}$). |
+| $t\_{\text{floor\_pad}}$ \newline `t_floor_pad_mm` | 20.0 | $\ge 0.0$ | mm | Thickness of concrete or tile topping pad above screed datum $z = 0$. |
+| $t\_{\text{screed}}$ \newline `t_screed_mm` | 30.0 | 20.0 to 100.0 | mm | Thickness of fiber-reinforced structural screed layer. |
+| $t\_{\text{vip}}$ \newline `t_vip_mm` | 20.0 | 10.0 to 50.0 | mm | Thickness of Vacuum Insulation Panel (VIP) subfloor layer. |
+| $k\_{\text{vip}}$ \newline `k_vip` | 0.007 | 0.004 to 0.010 | $\text{W/m}\cdot\text{K}$ | Center-of-panel thermal conductivity of subfloor VIP layer ($R\_{\text{vip}} = t\_{\text{vip}} / k\_{\text{vip}}$). |
+| $k\_{\text{pad}}$ \newline `k_pad` | 1.40 | 0.80 to 2.50 | $\text{W/m}\cdot\text{K}$ | Thermal conductivity of concrete or porcelain tile floor pad. |
+| $k\_{\text{screed}}$ \newline `k_screed` | 1.20 | 0.80 to 1.80 | $\text{W/m}\cdot\text{K}$ | Thermal conductivity of fiber-reinforced floor screed. |
 
 ### 3.4 Hood, Ventilation & Room Envelope Parameters
 
-| Symbol | Parameter Name | Baseline Default | Valid Range | Units | Physical Role & Model Validity Limits |
-| --- | --- | --- | --- | --- | --- |
-| $\dot{V}\_{\text{fan}}$ | `exhaust_fan_cfm` | 350.0 | 0.0 to 1000.0 | CFM | Active volumetric flow rate of overhead exhaust blower ($1\ \text{CFM} = 4.719 \times 10^{-4}\ \text{m}^3/\text{s}$). |
-| $D\_{\text{hood}}$ | `d_hood_inlet_mm` | 800.0 | 500.0 to 1200.0 | mm | Bottom capture opening diameter of canopy hood. |
-| $D\_{\text{duct}}$ | `d_hood_duct_mm` | 150.0 | 100.0 to 250.0 | mm | Exhaust duct throat diameter exiting top of hood. |
-| $z\_{\text{hood\_drop}}$ | `z_hood_drop_mm` | 400.0 | 100.0 to 1000.0 | mm | Distance from ceiling down to hood inlet rim ($z\_{\text{hood,inlet}} = H\_{\text{wall}} - z\_{\text{hood\_drop}}$). |
-| $x\_{\text{hood}}, y\_{\text{hood}}$ | `x_hood_mm`, `y_hood_mm` | 600.0, 600.0 | $> 0.0$ | mm | Planar coordinates of vertical hood centerline axis (centered above kiln axis). |
-| $L\_{\text{room}}, W\_{\text{room}}$ | `l_room_mm`, `w_room_mm` | 3530.0, 2770.0 | $> 0.0$ | mm | Interior studio dimensions along +x (Left Wall) and +y (Back Wall). |
-| $W\_{\text{glass\_door}}$ | `w_glass_door_mm` | 2000.0 | $> 0.0$ | mm | Total width of glazed sliding door assembly on front wall ($x = L\_{\text{room}}$). |
-| $W\_{\text{door\_gap}}$ | `w_door_open_mm` | 150.0 | 0.0 to $W\_{\text{glass\_door}}$ | mm | Open slot width of ajar sliding door during firing. |
-| $H\_{\text{door}}$ | `h_door_mm` | 2100.0 | $> 0.0$ | mm | Height of sliding glass door opening. |
-| $U\_{\text{roof}}$ | `u_roof` | 0.18 | 0.10 to 0.50 | $\text{W/m}^2\text{K}$ | Overall thermal transmittance of insulated ceiling/roof structure. |
-| $U\_{\text{glass\_door}}$ | `u_glass_door` | 1.40 | 1.00 to 3.00 | $\text{W/m}^2\text{K}$ | Thermal transmittance of double-glazed sliding doors. |
-| $T\_{\text{ext}}$ | `t_ext_c` | 20.0 | -10.0 to 40.0 |  deg C | Outdoor / external ambient make-up air temperature. |
+| Parameter (`config_field`) | Baseline Default | Valid Range | Units | Physical Role & Model Validity Limits |
+|:--------------------------|:-----------------|:------------|:------|:---------------------------------------------------------------------------------------------------|
+| $\dot{V}\_{\text{fan}}$ \newline `exhaust_fan_cfm` | 350.0 | 0.0 to 1000.0 | CFM | Active volumetric flow rate of overhead exhaust blower ($1\ \text{CFM} = 4.719 \times 10^{-4}\ \text{m}^3/\text{s}$). |
+| $D\_{\text{hood}}$ \newline `d_hood_inlet_mm` | 800.0 | 500.0 to 1200.0 | mm | Bottom capture opening diameter of canopy hood. |
+| $D\_{\text{duct}}$ \newline `d_hood_duct_mm` | 150.0 | 100.0 to 250.0 | mm | Exhaust duct throat diameter exiting top of hood. |
+| $z\_{\text{hood\_drop}}$ \newline `z_hood_drop_mm` | 400.0 | 100.0 to 1000.0 | mm | Distance from ceiling down to hood inlet rim ($z\_{\text{hood,inlet}} = H\_{\text{wall}} - z\_{\text{hood\_drop}}$). |
+| $x\_{\text{hood}}, y\_{\text{hood}}$ \newline `x_hood_mm, y_hood_mm` | 600.0, 600.0 | $> 0.0$ | mm | Planar coordinates of vertical hood centerline axis (centered above kiln axis). |
+| $L\_{\text{room}}, W\_{\text{room}}$ \newline `l_room_mm, w_room_mm` | 3530.0, 2770.0 | $> 0.0$ | mm | Interior studio dimensions along +x (Left Wall) and +y (Back Wall). |
+| $W\_{\text{glass\_door}}$ \newline `w_glass_door_mm` | 2000.0 | $> 0.0$ | mm | Total width of glazed sliding door assembly on front wall ($x = L\_{\text{room}}$). |
+| $W\_{\text{door\_gap}}$ \newline `w_door_open_mm` | 150.0 | 0.0 to $W\_{\text{glass\_door}}$ | mm | Open slot width of ajar sliding door during firing. |
+| $H\_{\text{door}}$ \newline `h_door_mm` | 2100.0 | $> 0.0$ | mm | Height of sliding glass door opening. |
+| $U\_{\text{roof}}$ \newline `u_roof` | 0.18 | 0.10 to 0.50 | $\text{W/m}^2\text{K}$ | Overall thermal transmittance of insulated ceiling/roof structure. |
+| $U\_{\text{glass\_door}}$ \newline `u_glass_door` | 1.40 | 1.00 to 3.00 | $\text{W/m}^2\text{K}$ | Thermal transmittance of double-glazed sliding doors. |
+| $T\_{\text{ext}}$ \newline `t_ext_c` | 20.0 | -10.0 to 40.0 | deg C | Outdoor / external ambient make-up air temperature. |
 
 ### 3.5 Material Emissivities, Conductivities & Discretization
 
-| Symbol | Parameter Name | Baseline Default | Units | Notes |
-| --- | --- | --- | --- | --- |
-| $\varepsilon\_{\text{kiln}}$ | `eps_kiln` | 0.60 | -- | Stainless steel outer jacket and lid band ($0.40\text{ new} - 0.70\text{ oxidized}$). |
-| $\varepsilon\_{\text{shield}}$ | `eps_shield` | 0.90 | -- | Promatect-H calcium silicate board surface. |
-| $\varepsilon\_{\text{gypsum}}$ | `eps_gypsum` | 0.90 | -- | Class A2 gypsum plasterboard surface. |
-| $\varepsilon\_{\text{aac}}$ | `eps_aac` | 0.88 | -- | Bare Airtec aerated concrete block surface. |
-| $\varepsilon\_{\text{reflector}}$ | `eps_reflector_top` | 0.15 | -- | Polished stainless steel top surface ($\rho\_s = 1 - \varepsilon\_{\text{reflector}} = 0.85$). |
-| $\varepsilon\_{\text{ssr}}$ | `eps_ssr` | 0.60 | -- | Painted sheet-metal SSR electrical enclosure. |
-| $k\_{\text{shield}}$ | `k_shield` | 0.175 | $\text{W/m}\cdot\text{K}$ | Promatect-H calcium silicate board. |
-| $k\_{\text{gypsum}}$ | `k_gypsum` | 0.24 | $\text{W/m}\cdot\text{K}$ | Standard gypsum plasterboard. |
-| $k\_{\text{aac}}$ | `k_aac` | 0.13 | $\text{W/m}\cdot\text{K}$ | Airtec aerated autoclaved concrete block. |
-| $\Delta x\_{\text{wall}}, \Delta z\_{\text{wall}}$ | `dx_wall_mm`, `dz_wall_mm` | 50.0, 50.0 | mm | Horizontal and vertical patch grid resolution on Left and Back walls. |
-| $N\_\theta, N\_z$ | `n_theta_kiln`, `n_z_kiln` | 24, 6 | -- | Circumferential (15 deg arc) and axial divisions of cylindrical kiln body. |
+| Parameter (`config_field`) | Baseline Default | Units | Notes |
+|:--------------------------|:-----------------|:------|:---------------------------------------------------------------------------------------------------|
+| $\varepsilon\_{\text{kiln}}$ \newline `eps_kiln` | 0.60 | -- | Stainless steel outer jacket and lid band ($0.40\text{ new} - 0.70\text{ oxidized}$). |
+| $\varepsilon\_{\text{shield}}$ \newline `eps_shield` | 0.90 | -- | Promatect-H calcium silicate board surface. |
+| $\varepsilon\_{\text{gypsum}}$ \newline `eps_gypsum` | 0.90 | -- | Class A2 gypsum plasterboard surface. |
+| $\varepsilon\_{\text{aac}}$ \newline `eps_aac` | 0.88 | -- | Bare Airtec aerated concrete block surface. |
+| $\varepsilon\_{\text{reflector}}$ \newline `eps_reflector_top` | 0.15 | -- | Polished stainless steel top surface ($\rho\_s = 1 - \varepsilon\_{\text{reflector}} = 0.85$). |
+| $\varepsilon\_{\text{ssr}}$ \newline `eps_ssr` | 0.60 | -- | Painted sheet-metal SSR electrical enclosure. |
+| $k\_{\text{shield}}$ \newline `k_shield` | 0.175 | $\text{W/m}\cdot\text{K}$ | Promatect-H calcium silicate board. |
+| $k\_{\text{gypsum}}$ \newline `k_gypsum` | 0.24 | $\text{W/m}\cdot\text{K}$ | Standard gypsum plasterboard. |
+| $k\_{\text{aac}}$ \newline `k_aac` | 0.13 | $\text{W/m}\cdot\text{K}$ | Airtec aerated autoclaved concrete block. |
+| $\Delta x\_{\text{wall}}, \Delta z\_{\text{wall}}$ \newline `dx_wall_mm, dz_wall_mm` | 50.0, 50.0 | mm | Horizontal and vertical patch grid resolution on Left and Back walls. |
+| $N\_\theta, N\_z$ \newline `n_theta_kiln, n_z_kiln` | 24, 6 | -- | Circumferential (15 deg arc) and axial divisions of cylindrical kiln body. |
 
 ### 3.6 Derived Parameters (Computed Automatically from User Inputs)
 
-| Symbol | Derived Parameter Name | Mathematical Formula | Units | Physical Meaning |
-| --- | --- | --- | --- | --- |
-| $z\_{\text{pad,top}}$ | `z_pad_top` | $t\_{\text{floor\_pad}}$ | mm | Elevation of top surface of concrete/tile floor pad above screed ($z = 0$). |
-| $z\_{\text{reflector,bot}}$ | `z_reflector_bot` | $z\_{\text{pad,top}} + g\_{\text{floor\_reflector}}$ | mm | Elevation of underside of circular floor reflector pan. |
-| $z\_{\text{reflector,top}}$ | `z_reflector_top` | $z\_{\text{reflector,bot}} + t\_{\text{reflector\_calsil}}$ | mm | Elevation of polished stainless steel top surface of floor reflector. |
-| $z\_{\text{drum,bot}}$ | `z_drum_bot` | $z\_{\text{pad,top}} + h\_{\text{kiln\_base}}$ | mm | Elevation of underside of kiln drum bottom plate above screed ($z = 0$). |
-| $H\_{\text{kiln}}$ | `h_kiln_total` | $H\_{\text{drum}} + t\_{\text{lid}}$ | mm | Total closed cylinder height of kiln drum plus refractory lid. |
-| $z\_{\text{kiln,top}}$ | `z_kiln_top` | $z\_{\text{drum,bot}} + H\_{\text{drum}} + t\_{\text{lid}}$ | mm | Elevation of top surface of closed refractory lid. |
-| $z\_{\text{ssr,bot}}$ | `z_ssr_bot` | $z\_{\text{drum,bot}} + z\_{\text{SSR\_offset}}$ | mm | Elevation of bottom louver face of SSR electrical enclosure. |
-| $z\_{\text{ssr,top}}$ | `z_ssr_top` | $z\_{\text{ssr,bot}} + H\_{\text{SSR}}$ | mm | Elevation of top face of SSR electrical enclosure. |
-| $z\_{\text{bung}}$ | `z_bung` | $z\_{\text{drum,bot}} + z\_{\text{bung\_offset}}$ | mm | Elevation of open top rim of stainless steel dilution cup. |
-| $x\_{\text{bung}}, y\_{\text{bung}}$ | `x_bung`, `y_bung` | $x\_k + r\_{\text{bung}} \cos\theta\_{\text{bung}}, \; y\_k + r\_{\text{bung}} \sin\theta\_{\text{bung}}$ | mm | Planar coordinates of exhaust dilution cup center. |
-| $H\_{\text{shield}}$ | `h_shield` | $H\_{\text{wall}} - g\_{\text{floor}} - g\_{\text{ceil}}$ | mm | Vertical height of Promatect-H shield panels. |
-| $z\_{\text{mirror}}$ | `z_mirror` | $2 z\_{\text{reflector,top}} - z\_{\text{drum,bot}}$ | mm | Elevation of virtual specular mirror image of kiln base in floor reflector. |
-| $z\_{\text{hood,inlet}}$ | `z_hood_inlet` | $H\_{\text{wall}} - z\_{\text{hood\_drop}}$ | mm | Elevation of canopy hood capture mouth above screed ($z = 0$). |
-| $d\_{\text{eff}}$ | `d_chimney_eff` | $d\_{\text{chimney}} (1 - f\_{\text{block}})$ | mm | Effective hydraulic depth of behind-shield chimney channel. |
-| $U\_{\text{aac\_wall}}$ | `u_aac_wall` | $\left( R\_{si} + \frac{t\_{\text{aac}}}{k\_{\text{aac}}} + R\_{se} \right)^{-1}$ | $\text{W/m}^2\text{K}$ | Unshielded thermal transmittance of bare AAC block wall ($R\_{si}=0.13, R\_{se}=0.04$). |
-| $(UA)\_{\text{upper}}$ | `compute_ua_upper_zone` | $U\_{\text{roof}} A\_{\text{roof}} + U\_{\text{aac}} A\_{\text{wall,up}} + U\_{\text{door}} A\_{\text{door,up}}$ | W/K | Parallel envelope thermal conductance of upper room gas layer above $z\_{\text{layer}}$. |
-| $(UA)\_{\text{lower}}$ | `compute_ua_lower_zone` | $U\_{\text{aac}} A\_{\text{wall,low}} + U\_{\text{door}} A\_{\text{door,low}} + U\_{\text{subfloor}} A\_{\text{floor}}$ | W/K | Parallel envelope thermal conductance of lower room zone below $z\_{\text{layer}}$. |
+| Derived Parameter (`identifier`) | Mathematical Formula | Units | Physical Meaning |
+|:---------------------------------|:-------------------------------------------------------|:------|:-------------------------------------------------------------------|
+| $z\_{\text{pad,top}}$ \newline `z_pad_top` | $t\_{\text{floor\_pad}}$ | mm | Elevation of top surface of concrete/tile floor pad above screed ($z = 0$). |
+| $z\_{\text{reflector,bot}}$ \newline `z_reflector_bot` | $z\_{\text{pad,top}} + g\_{\text{floor\_reflector}}$ | mm | Elevation of underside of circular floor reflector pan. |
+| $z\_{\text{reflector,top}}$ \newline `z_reflector_top` | $z\_{\text{reflector,bot}} + t\_{\text{reflector\_calsil}}$ | mm | Elevation of polished stainless steel top surface of floor reflector. |
+| $z\_{\text{drum,bot}}$ \newline `z_drum_bot` | $z\_{\text{pad,top}} + h\_{\text{kiln\_base}}$ | mm | Elevation of underside of kiln drum bottom plate above screed ($z = 0$). |
+| $H\_{\text{kiln}}$ \newline `h_kiln_total` | $H\_{\text{drum}} + t\_{\text{lid}}$ | mm | Total closed cylinder height of kiln drum plus refractory lid. |
+| $z\_{\text{kiln,top}}$ \newline `z_kiln_top` | $z\_{\text{drum,bot}} + H\_{\text{drum}} + t\_{\text{lid}}$ | mm | Elevation of top surface of closed refractory lid. |
+| $z\_{\text{ssr,bot}}$ \newline `z_ssr_bot` | $z\_{\text{drum,bot}} + z\_{\text{SSR\_offset}}$ | mm | Elevation of bottom louver face of SSR electrical enclosure. |
+| $z\_{\text{ssr,top}}$ \newline `z_ssr_top` | $z\_{\text{ssr,bot}} + H\_{\text{SSR}}$ | mm | Elevation of top face of SSR electrical enclosure. |
+| $z\_{\text{bung}}$ \newline `z_bung` | $z\_{\text{drum,bot}} + z\_{\text{bung\_offset}}$ | mm | Elevation of open top rim of stainless steel dilution cup. |
+| $x\_{\text{bung}}, y\_{\text{bung}}$ \newline `x_bung, y_bung` | $x\_k + r\_{\text{bung}} \cos\theta\_{\text{bung}}, \; y\_k + r\_{\text{bung}} \sin\theta\_{\text{bung}}$ | mm | Planar coordinates of exhaust dilution cup center. |
+| $H\_{\text{shield}}$ \newline `h_shield` | $H\_{\text{wall}} - g\_{\text{floor}} - g\_{\text{ceil}}$ | mm | Vertical height of Promatect-H shield panels. |
+| $z\_{\text{mirror}}$ \newline `z_mirror` | $2 z\_{\text{reflector,top}} - z\_{\text{drum,bot}}$ | mm | Elevation of virtual specular mirror image of kiln base in floor reflector. |
+| $z\_{\text{hood,inlet}}$ \newline `z_hood_inlet` | $H\_{\text{wall}} - z\_{\text{hood\_drop}}$ | mm | Elevation of canopy hood capture mouth above screed ($z = 0$). |
+| $d\_{\text{eff}}$ \newline `d_chimney_eff` | $d\_{\text{chimney}} (1 - f\_{\text{block}})$ | mm | Effective hydraulic depth of behind-shield chimney channel. |
+| $U\_{\text{aac\_wall}}$ \newline `u_aac_wall` | $\left( R\_{si} + \frac{t\_{\text{aac}}}{k\_{\text{aac}}} + R\_{se} \right)^{-1}$ | $\text{W/m}^2\text{K}$ | Unshielded thermal transmittance of bare AAC block wall ($R\_{si}=0.13, R\_{se}=0.04$). |
+| $(UA)\_{\text{upper}}$ \newline `compute_ua_upper_zone` | $U\_{\text{roof}} A\_{\text{roof}} + U\_{\text{aac}} A\_{\text{wall,up}} + U\_{\text{door}} A\_{\text{door,up}}$ | W/K | Parallel envelope thermal conductance of upper room gas layer above $z\_{\text{layer}}$. |
+| $(UA)\_{\text{lower}}$ \newline `compute_ua_lower_zone` | $U\_{\text{aac}} A\_{\text{wall,low}} + U\_{\text{door}} A\_{\text{door,low}} + U\_{\text{subfloor}} A\_{\text{floor}}$ | W/K | Parallel envelope thermal conductance of lower room zone below $z\_{\text{layer}}$. |
 
 ---
 
@@ -363,7 +363,7 @@ The louvered SSR enclosure at $\theta\_{\text{SSR}} = -45^\circ$ exchanges radia
 Every simulation run evaluates and outputs the following telemetry metrics against conservative engineering safety limits:
 
 | Telemetry Key | Physical Meaning | Pass Threshold | Failure Consequence if Exceeded |
-| --- | --- | --- | --- |
+|:------------------------------|:---------------------------------------|:---------------|:-------------------------------------------------------------------|
 | `t_gypsum_max_left_c` | Peak surface temperature on exposed gypsum on Left Wall | $< 40.0^\circ\text{C}$ | Slow dehydration of $\text{CaSO}\_4 \cdot 2\text{H}\_2\text{O} \to$ hemihydrate (Siniat $40^\circ\text{C}$ / British Gypsum $49^\circ\text{C}$ limit). |
 | `t_gypsum_max_back_c` | Peak surface temperature on exposed gypsum on Back Wall | $< 40.0^\circ\text{C}$ | Slow dehydration and structural degradation of gypsum board. |
 | `gypsum_safe` | Boolean flag: true if both left and back exposed gypsum $< 40.0^\circ\text{C}$ | `true` | Unsafe thermal exposure of studio plasterboard. |
