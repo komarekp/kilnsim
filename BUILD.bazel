@@ -6,7 +6,25 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "README.md",
+    "software_implementation.md",
+    "thermal_maths.md",
 ])
+
+genrule(
+    name = "thermal_maths_pdf",
+    srcs = ["thermal_maths.md"],
+    outs = ["thermal_maths.pdf"],
+    cmd = "pandoc $(location thermal_maths.md) --pdf-engine=xelatex -o $@",
+    tags = ["requires-network"],
+)
+
+genrule(
+    name = "software_implementation_pdf",
+    srcs = ["software_implementation.md"],
+    outs = ["software_implementation.pdf"],
+    cmd = "pandoc $(location software_implementation.md) --pdf-engine=xelatex -o $@",
+    tags = ["requires-network"],
+)
 
 filegroup(
     name = "configs",
