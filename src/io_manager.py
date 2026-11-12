@@ -118,6 +118,7 @@ def write_simulation_output(
     output_dir: Optional[pathlib.Path] = None,
     explicit_output_file: Optional[pathlib.Path] = None,
     compact_timestamp: Optional[str] = None,
+    patches_textproto: Optional[str] = None,
 ) -> pathlib.Path:
   """Serializes a SimulationOutput message to a human-readable .textproto file.
 
@@ -131,6 +132,8 @@ def write_simulation_output(
     output_dir: Target directory when explicit_output_file is not set.
     explicit_output_file: Optional explicit file path for the output.
     compact_timestamp: Optional compact UTC timestamp string (`YYYYMMDDTHHMMSSZ`).
+    patches_textproto: Optional pre-formatted `patches { ... }` textproto string
+      to append when `output_pb.patches` was omitted for speed.
 
   Returns:
     The resolved Path of the written .out.textproto file.
@@ -154,6 +157,8 @@ def write_simulation_output(
       "# proto-message: kiln_sim.SimulationOutput\n\n"
   )
   serialized_text = header_comment + text_format.MessageToString(output_pb)
+  if patches_textproto:
+    serialized_text += patches_textproto
 
   temp_path = target_path.with_suffix(".tmp")
   temp_path.write_text(serialized_text, encoding="utf-8")

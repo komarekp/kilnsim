@@ -333,6 +333,7 @@ def build_simulation_output(
     mesh: mesh_lib.SurfaceMesh,
     vf_sys: vf_lib.ViewFactorSystem,
     solution: solver_lib.SolverSolution,
+    include_patches: bool = True,
 ) -> kiln_sim_pb2.SimulationOutput:
   """Assembles the complete SimulationOutput protobuf record."""
   provenance = kiln_sim_pb2.SimulationOutput.Provenance(
@@ -347,7 +348,9 @@ def build_simulation_output(
   metrics_pb = compute_safety_metrics(
       mesh=mesh, vf_sys=vf_sys, solution=solution, params=params
   )
-  patches_pb = mesh.to_patch_protos(solution=solution)
+  patches_pb = (
+      mesh.to_patch_protos(solution=solution) if include_patches else []
+  )
 
   output_pb = kiln_sim_pb2.SimulationOutput(
       provenance=provenance,

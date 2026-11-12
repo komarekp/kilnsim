@@ -101,6 +101,7 @@ class SurfaceMesh:
     self.n_cols_back: int = n_cols_back
     self.n_rows_shield: int = n_rows_shield
     self.floor_sensors: dict[str, FloorSensorPoint] = floor_sensors
+    self._patch_textproto_prefixes: Optional[list[str]] = None
 
   def get_patch(
       self,
@@ -270,6 +271,80 @@ class SurfaceMesh:
           )
       )
     return protos
+
+  def format_patches_textproto(
+      self,
+      solution: Any,
+  ) -> str:
+    """Formats all patches and solved states directly as textproto blocks.
+
+    Caches the static geometric fields for each patch on first invocation so
+    repeated calls across a geometry group only format the 4 dynamic solved
+    scalars per patch.
+
+    Args:
+      solution: Converged SolverSolution instance.
+
+    Returns:
+      Concatenated `patches { ... }` textproto string matching
+      `text_format.MessageToString`.
+    """
+    if not isinstance(getattr(solution, "t_front_k", None), np.ndarray):
+      return ""
+    if self._patch_textproto_prefixes is None:
+      prefixes: list[str] = []
+      for pid in range(self.num_patches):
+        lines = ["patches {\n"]
+        if pid != 0:
+          lines.append(f"  patch_id: {pid}\n")
+        stype_val = int(self.surface_types[pid])
+        if stype_val != 0:
+          stype_name = kiln_sim_pb2.SurfaceType.Name(stype_val)
+          lines.append(f"  surface_type: {stype_name}\n")
+        c = self.centroids[pid]
+        if c[0] != 0.0:
+          lines.append(f"  x_m: {float(c[0])}\n")
+        if c[1] != 0.0:
+          lines.append(f"  y_m: {float(c[1])}\n")
+        if c[2] != 0.0:
+          lines.append(f"  z_m: {float(c[2])}\n")
+        n = self.normals[pid]
+        if n[0] != 0.0:
+          lines.append(f"  nx: {float(n[0])}\n")
+        if n[1] != 0.0:
+          lines.append(f"  ny: {float(n[1])}\n")
+        if n[2] != 0.0:
+          lines.append(f"  nz: {float(n[2])}\n")
+        area = float(self.areas[pid])
+        if area != 0.0:
+          lines.append(f"  area_m2: {area}\n")
+        prefixes.append("".join(lines))
+      self._patch_textproto_prefixes = prefixes
+
+    t_front_c_list = (solution.t_front_k - params_lib.KELVIN_OFFSET).tolist()
+    t_back_c_list = (solution.t_back_k - params_lib.KELVIN_OFFSET).tolist()
+    q_rad_list = solution.q_rad_net_w_m2.tolist()
+    q_conv_list = solution.q_conv_net_w_m2.tolist()
+
+    blocks: list[str] = []
+    for prefix, tf, tb, qr, qc in zip(
+        self._patch_textproto_prefixes,
+        t_front_c_list,
+        t_back_c_list,
+        q_rad_list,
+        q_conv_list,
+    ):
+      block = prefix
+      if tf != 0.0:
+        block += f"  temp_front_c: {tf}\n"
+      if tb != 0.0:
+        block += f"  temp_back_c: {tb}\n"
+      if qr != 0.0:
+        block += f"  q_rad_net_w_m2: {qr}\n"
+      if qc != 0.0:
+        block += f"  q_conv_net_w_m2: {qc}\n"
+      blocks.append(block + "}\n")
+    return "".join(blocks)
 
 
 def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:

@@ -181,10 +181,25 @@ def _solve_ssr_internal_air(
   return t_air_k, t_ssr_case_k
 
 
+def factor_radiosity_matrix(
+    mesh: mesh_lib.SurfaceMesh,
+    vf_sys: vf_lib.ViewFactorSystem,
+) -> tuple[np.ndarray, np.ndarray]:
+  """Precomputes the LU factorization of `I - (1 - eps) * F_eff`."""
+  n_patches = mesh.num_patches
+  eps = mesh.emissivities
+  rad_matrix = np.eye(n_patches, dtype=np.float64) - (
+      (1.0 - eps)[:, None] * vf_sys.f_eff
+  )
+  return linalg.lu_factor(rad_matrix)
+
+
 def solve_thermal_system(
     mesh: mesh_lib.SurfaceMesh,
     vf_sys: vf_lib.ViewFactorSystem,
     params: params_lib.SimParams,
+    lu_piv: tuple[np.ndarray, np.ndarray] | None = None,
+    initial_solution: SolverSolution | None = None,
 ) -> SolverSolution:
   """Executes the coupled inner (surface) and middle (room) solver loops.
 
@@ -196,6 +211,9 @@ def solve_thermal_system(
     mesh: Discretized SurfaceMesh instance.
     vf_sys: Precomputed ViewFactorSystem instance.
     params: Validated SimParams instance.
+    lu_piv: Optional precomputed LU factorization from `factor_radiosity_matrix`.
+    initial_solution: Optional converged SolverSolution from a similar run to
+      warm-start surface and room zone temperatures.
 
   Returns:
     Converged SolverSolution instance.
@@ -206,10 +224,8 @@ def solve_thermal_system(
   z_coords = mesh.centroids[:, 2]
   eps = mesh.emissivities
 
-  rad_matrix = np.eye(n_patches, dtype=np.float64) - (
-      (1.0 - eps)[:, None] * vf_sys.f_eff
-  )
-  lu_piv = linalg.lu_factor(rad_matrix)
+  if lu_piv is None:
+    lu_piv = factor_radiosity_matrix(mesh, vf_sys)
 
   char_lengths = np.full(n_patches, params.h_wall, dtype=np.float64)
   char_lengths[stypes == int(mesh_lib.SurfaceType.KILN_SIDE)] = (
@@ -268,21 +284,35 @@ def solve_thermal_system(
   u_cond_diag[ssr_mask] = 5.5
 
   dt_firing = max(0.0, params.t_internal_k - params.t_ext_k)
-  t_room_lower_k = params.t_ext_k
-  t_room_upper_k = params.t_ext_k
-  z_layer_m = params.z_hood_inlet
+  if (
+      initial_solution is not None
+      and initial_solution.converged
+      and initial_solution.t_front_k.shape == (n_patches,)
+  ):
+    t_room_lower_k = initial_solution.room.t_room_lower_k
+    t_room_upper_k = initial_solution.room.t_room_upper_k
+    z_layer_m = initial_solution.room.z_stratification_layer_m
+    t_front_k = initial_solution.t_front_k.copy()
+    t_back_k = initial_solution.t_back_k.copy()
+    t_back_k[kiln_side_mask | kiln_lid_mask | kiln_bot_mask] = (
+        params.t_internal_k
+    )
+  else:
+    t_room_lower_k = params.t_ext_k
+    t_room_upper_k = params.t_ext_k
+    z_layer_m = params.z_hood_inlet
 
-  t_front_k = np.full(
-      n_patches, params.t_ext_k + 0.008 * dt_firing, dtype=np.float64
-  )
-  t_front_k[kiln_side_mask] = params.t_ext_k + 0.095 * dt_firing
-  t_front_k[kiln_lid_mask] = params.t_ext_k + 0.130 * dt_firing
-  t_front_k[kiln_bot_mask] = params.t_ext_k + 0.120 * dt_firing
+    t_front_k = np.full(
+        n_patches, params.t_ext_k + 0.008 * dt_firing, dtype=np.float64
+    )
+    t_front_k[kiln_side_mask] = params.t_ext_k + 0.095 * dt_firing
+    t_front_k[kiln_lid_mask] = params.t_ext_k + 0.130 * dt_firing
+    t_front_k[kiln_bot_mask] = params.t_ext_k + 0.120 * dt_firing
 
-  t_back_k = t_front_k.copy()
-  t_back_k[kiln_side_mask | kiln_lid_mask | kiln_bot_mask] = (
-      params.t_internal_k
-  )
+    t_back_k = t_front_k.copy()
+    t_back_k[kiln_side_mask | kiln_lid_mask | kiln_bot_mask] = (
+        params.t_internal_k
+    )
 
   latest_state: dict[str, Any] = {}
   t_max_bound = max(params.t_internal_k + 50.0, params.t_ext_k + 100.0)
@@ -445,7 +475,11 @@ def solve_thermal_system(
         t_room_lower_k - params_lib.KELVIN_OFFSET,
         dt_room_change,
     )
-    if max_res < 0.5 and dt_room_change < 0.05:
+    if (
+        max_res < 0.5
+        and dt_room_change < 0.05
+        and (outer_iter >= 1 or dt_room_change < 0.005)
+    ):
       converged = True
       break
 

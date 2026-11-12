@@ -18,6 +18,10 @@ import sys
 import time
 from typing import Iterable, Optional, Sequence
 
+# Prevent OpenBLAS / OpenMP thread oversubscription across worker processes.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 _SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 _WORKSPACE_DIR = pathlib.Path(
     os.environ.get("BUILD_WORKSPACE_DIRECTORY", str(_SCRIPT_DIR))
@@ -151,7 +155,7 @@ class SweepPoint:
 
   @property
   def geometry_cache_key(self) -> tuple[float, ...]:
-    """Returns the subset of parameters that determine mesh and view factors."""
+    """Returns the subset of parameters that determine mesh and patch view factors."""
     return (
         self.s_kiln_mm,
         self.w_floor_pad_mm,
@@ -162,7 +166,6 @@ class SweepPoint:
         self.d_chimney_mm,
         self.g_chimney_mm,
         self.w_shield_mm,
-        self.d_hood_inlet_mm,
     )
 
 
@@ -180,7 +183,6 @@ def enumerate_sweep_points() -> list[SweepPoint]:
   points: list[SweepPoint] = []
   for (
       s_kiln,
-      u_kiln_side,
       w_pad,
       t_pad,
       d_refl,
@@ -190,12 +192,12 @@ def enumerate_sweep_points() -> list[SweepPoint]:
       g_chim,
       w_shield,
       d_hood,
+      u_kiln_side,
       bung_cap,
       w_door,
       cfm,
   ) in itertools.product(
       KILN_STANDOFFS_MM,
-      U_KILN_SIDE_VALUES,
       PAD_SIZES_MM,
       PAD_THICKNESSES_MM,
       REFLECTOR_DIAMETERS_MM,
@@ -205,6 +207,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
       CHIMNEY_GAPS_MM,
       SHIELD_WIDTHS_MM,
       HOOD_INLETS_MM,
+      U_KILN_SIDE_VALUES,
       BUNG_CAPTURED_VALUES,
       DOOR_OPEN_VALUES_MM,
       CFM_VALUES,
@@ -531,6 +534,9 @@ def _run_geometry_group(
   output_dir = pathlib.Path(output_dir_str)
   mesh = None
   vf_sys = None
+  lu_piv = None
+  cached_r_hood_inlet: float | None = None
+  last_converged_solution: solver_lib.SolverSolution | None = None
   geometry_error: str | None = None
   attempted = 0
   succeeded_count = 0
@@ -557,10 +563,12 @@ def _run_geometry_group(
         )
         continue
 
-      if mesh is None or vf_sys is None:
+      if mesh is None or vf_sys is None or lu_piv is None:
         try:
           mesh = mesh_lib.build_mesh(params)
           vf_sys = vf_lib.compute_view_factors(mesh, params)
+          lu_piv = solver_lib.factor_radiosity_matrix(mesh, vf_sys)
+          cached_r_hood_inlet = params.r_hood_inlet
         except Exception as exc:  # pylint: disable=broad-exception-caught
           geometry_error = f"{type(exc).__name__}: {exc}"
           failed_runs.append(
@@ -571,9 +579,19 @@ def _run_geometry_group(
               )
           )
           continue
+      elif (
+          cached_r_hood_inlet is None
+          or abs(params.r_hood_inlet - cached_r_hood_inlet) > 1e-6
+      ):
+        vf_sys = vf_lib.update_ceiling_sensor_vfs(vf_sys, mesh, params)
+        cached_r_hood_inlet = params.r_hood_inlet
 
       solution = solver_lib.solve_thermal_system(
-          mesh=mesh, vf_sys=vf_sys, params=params
+          mesh=mesh,
+          vf_sys=vf_sys,
+          params=params,
+          lu_piv=lu_piv,
+          initial_solution=last_converged_solution,
       )
       timestamp_utc = datetime.datetime.now(datetime.timezone.utc).strftime(
           "%Y-%m-%dT%H:%M:%SZ"
@@ -587,6 +605,7 @@ def _run_geometry_group(
           mesh=mesh,
           vf_sys=vf_sys,
           solution=solution,
+          include_patches=False,
       )
 
       out_filename = f"{exp_name}.out.textproto"
@@ -594,10 +613,12 @@ def _run_geometry_group(
           output_pb=output_pb,
           input_config_path=config_path,
           explicit_output_file=output_dir / out_filename,
+          patches_textproto=mesh.format_patches_textproto(solution),
       )
 
       if solution.converged:
         succeeded_count += 1
+        last_converged_solution = solution
       else:
         dt_room_val = getattr(solution, "dt_room_change_k", 0.0)
         failed_runs.append(
@@ -743,13 +764,21 @@ def filter_pending_points(
 ) -> list[SweepPoint]:
   """Filters out sweep points that already have a well-formed output file."""
   pending: list[SweepPoint] = []
+  params_cache: dict[tuple[float, ...], params_lib.SimParams] = {}
   for point in points:
     out_path = output_dir / f"{point.experiment_name}.out.textproto"
-    params = (
-        params_override
-        if params_override is not None
-        else params_lib.from_proto(build_config_proto(point))
-    )
+    if not out_path.is_file():
+      pending.append(point)
+      continue
+    if params_override is not None:
+      params = params_override
+    else:
+      cache_key = point.geometry_cache_key
+      if cache_key not in params_cache:
+        params_cache[cache_key] = params_lib.from_proto(
+            build_config_proto(point)
+        )
+      params = params_cache[cache_key]
     if not is_well_formed_output(out_path, params):
       pending.append(point)
   return pending

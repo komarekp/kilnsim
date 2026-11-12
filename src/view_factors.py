@@ -449,43 +449,43 @@ def compute_view_factors(
         & (stypes != int(mesh_lib.SurfaceType.KILN_LID))
     )
     cand_ids = np.flatnonzero(cand_mask)
-    for m_id_val in cand_ids:
-      m_id = int(m_id_val)
-      c_m = c[m_id]
-      n_m = n_vec[m_id]
-      a_m = areas[m_id]
-      r_vec_mr = ref_sub_coords - c_m[None, :]
-      dist_sq_mr = np.sum(r_vec_mr * r_vec_mr, axis=1)
+    if cand_ids.size > 0:
+      c_cand = c[cand_ids]
+      n_cand = n_vec[cand_ids]
+      a_cand = areas[cand_ids]
+      st_cand = stypes[cand_ids]
+
+      r_vec_mr = ref_sub_coords[None, :, :] - c_cand[:, None, :]
+      dist_sq_mr = np.sum(r_vec_mr * r_vec_mr, axis=2)
       dist_mr = np.sqrt(np.maximum(dist_sq_mr, 1e-12))
-      cos_m_r = np.sum(r_vec_mr * n_m[None, :], axis=1) / dist_mr
-      cos_ref = -r_vec_mr[:, 2] / dist_mr
+      cos_m_r = np.sum(r_vec_mr * n_cand[:, None, :], axis=2) / dist_mr
+      cos_ref = -r_vec_mr[:, :, 2] / dist_mr
       vis_mr = (cos_m_r > 1e-6) & (cos_ref > 1e-6)
-      if stypes[m_id] in (
-          int(mesh_lib.SurfaceType.KILN_SIDE),
-          int(mesh_lib.SurfaceType.SSR_BOX),
-      ):
-        vis_mr &= rr_ref_flat >= params.r_kiln - 1e-4
-      if np.any(vis_mr):
-        vis_idx = np.flatnonzero(vis_mr)
-        blocked_cyl = _is_segment_blocked_by_kiln_cylinder(
-            p1=ref_sub_coords[vis_idx], p2=np.broadcast_to(c_m, (vis_idx.size, 3)), params=params
+      annulus_only_rows = (
+          (st_cand == int(mesh_lib.SurfaceType.KILN_SIDE))
+          | (st_cand == int(mesh_lib.SurfaceType.SSR_BOX))
+      )
+      if np.any(annulus_only_rows):
+        vis_mr[annulus_only_rows, :] &= (
+            rr_ref_flat[None, :] >= params.r_kiln - 1e-4
         )
-        unblocked_idx = vis_idx[~blocked_cyl]
-        if unblocked_idx.size > 0:
-          denom_mr = (
-              math.pi * dist_sq_mr[unblocked_idx] + 0.5 * (a_m + d_area_ref)
-          )
-          af_m_ref = float(
-              np.sum(
-                  cos_m_r[unblocked_idx]
-                  * cos_ref[unblocked_idx]
-                  * a_m
-                  * d_area_ref
-                  / denom_mr
-              )
-          )
-          af_matrix[m_id, r_id] = af_m_ref
-          af_matrix[r_id, m_id] = af_m_ref
+      vis_m_idx, vis_q_idx = np.nonzero(vis_mr)
+      if vis_m_idx.size > 0:
+        blocked_cyl = _is_segment_blocked_by_kiln_cylinder(
+            p1=ref_sub_coords[vis_q_idx],
+            p2=c_cand[vis_m_idx],
+            params=params,
+        )
+        vis_mr[vis_m_idx[blocked_cyl], vis_q_idx[blocked_cyl]] = False
+      denom_mr = math.pi * dist_sq_mr + 0.5 * (a_cand[:, None] + d_area_ref)
+      af_sub = np.where(
+          vis_mr,
+          cos_m_r * cos_ref * a_cand[:, None] * d_area_ref / denom_mr,
+          0.0,
+      )
+      af_cand_ref = np.sum(af_sub, axis=1)
+      af_matrix[cand_ids, r_id] = af_cand_ref
+      af_matrix[r_id, cand_ids] = af_cand_ref
 
   f_direct = np.divide(
       af_matrix,
@@ -751,6 +751,27 @@ def compute_view_factors(
     sensor_vf[name] = vf_vec
 
   # 7. Ceiling downward-facing point-to-patch view factor vectors at z = h_wall
+  sensor_vf.update(compute_ceiling_sensor_vfs(mesh=mesh, params=params))
+
+  return ViewFactorSystem(
+      f_eff=f_eff,
+      f_room=f_room,
+      sensor_vf=sensor_vf,
+  )
+
+
+def compute_ceiling_sensor_vfs(
+    mesh: mesh_lib.SurfaceMesh,
+    params: params_lib.SimParams,
+) -> dict[str, np.ndarray]:
+  """Computes the downward-facing ceiling sensor view factor vectors at z = h_wall."""
+  c = mesh.centroids
+  n_vec = mesh.normals
+  areas = mesh.areas
+  stypes = mesh.surface_types
+  bot_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+  ref_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP))
+
   diag_inv = 1.0 / math.sqrt(2.0)
   r_ceil_sensor = params.r_hood_inlet + CEILING_SENSOR_RIM_OFFSET_M
   ceiling_points = {
@@ -783,6 +804,7 @@ def compute_view_factors(
   kiln_side_ids_ceil = np.flatnonzero(
       stypes == int(mesh_lib.SurfaceType.KILN_SIDE)
   )
+  ceil_sensor_vf: dict[str, np.ndarray] = {}
   for name, coord in ceiling_points.items():
     pt_c = np.array(coord, dtype=np.float64)
     vf_vec = _compute_point_to_patches_vf(
@@ -990,10 +1012,21 @@ def compute_view_factors(
     s_sum = float(np.sum(vf_vec))
     if s_sum > 0.99:
       vf_vec *= 0.99 / s_sum
-    sensor_vf[name] = vf_vec
+    ceil_sensor_vf[name] = vf_vec
 
+  return ceil_sensor_vf
+
+
+def update_ceiling_sensor_vfs(
+    vf_sys: ViewFactorSystem,
+    mesh: mesh_lib.SurfaceMesh,
+    params: params_lib.SimParams,
+) -> ViewFactorSystem:
+  """Returns a ViewFactorSystem with updated ceiling rim sensor view factors."""
+  new_sensor_vf = dict(vf_sys.sensor_vf)
+  new_sensor_vf.update(compute_ceiling_sensor_vfs(mesh=mesh, params=params))
   return ViewFactorSystem(
-      f_eff=f_eff,
-      f_room=f_room,
-      sensor_vf=sensor_vf,
+      f_eff=vf_sys.f_eff,
+      f_room=vf_sys.f_room,
+      sensor_vf=new_sensor_vf,
   )
