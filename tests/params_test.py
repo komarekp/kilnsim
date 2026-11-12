@@ -188,6 +188,38 @@ class ParamsTest(absltest.TestCase):
     with self.assertRaises(ValueError):
       params_lib.from_proto(cfg_shifted_y)
 
+  def test_separate_kiln_emissivities_and_deprecated_eps_kiln_fallback(
+      self,
+  ) -> None:
+    """Verifies eps_kiln_side/top/bot parsing and legacy eps_kiln fallback."""
+    params = params_lib.from_proto(self.base_pb)
+    self.assertAlmostEqual(params.eps_kiln_side, 0.60, places=6)
+    self.assertAlmostEqual(params.eps_kiln_top, 0.85, places=6)
+    self.assertAlmostEqual(params.eps_kiln_bot, 0.15, places=6)
+    self.assertAlmostEqual(params.h_drum, 0.595, places=6)
+    self.assertAlmostEqual(params.t_lid, 0.075, places=6)
+    self.assertAlmostEqual(params.u_kiln_bot, 0.80, places=6)
+
+    cfg_legacy = copy.deepcopy(self.base_pb)
+    cfg_legacy.thermal.emissivities.eps_kiln_side = 0.0
+    cfg_legacy.thermal.emissivities.eps_kiln_top = 0.0
+    cfg_legacy.thermal.emissivities.eps_kiln_bot = 0.0
+    cfg_legacy.thermal.emissivities.eps_kiln = 0.45
+    p_legacy = params_lib.from_proto(cfg_legacy)
+    self.assertAlmostEqual(p_legacy.eps_kiln_side, 0.45, places=6)
+    self.assertAlmostEqual(p_legacy.eps_kiln_top, 0.45, places=6)
+    self.assertAlmostEqual(p_legacy.eps_kiln_bot, 0.45, places=6)
+
+  def test_zero_reflector_diameter_is_valid(self) -> None:
+    """Allows d_reflector_mm = 0.0 to simulate having no floor reflector."""
+    cfg_no_ref = copy.deepcopy(self.base_pb)
+    cfg_no_ref.geometry.floor.d_reflector_mm = 0.0
+    cfg_no_ref.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg_no_ref.geometry.floor.g_floor_reflector_mm = 0.0
+    p_no_ref = params_lib.from_proto(cfg_no_ref)
+    self.assertEqual(p_no_ref.d_reflector, 0.0)
+    self.assertEqual(p_no_ref.r_reflector, 0.0)
+
 
 if __name__ == "__main__":
   absltest.main()

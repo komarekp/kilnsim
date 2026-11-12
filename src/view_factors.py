@@ -487,7 +487,12 @@ def compute_view_factors(
           af_matrix[m_id, r_id] = af_m_ref
           af_matrix[r_id, m_id] = af_m_ref
 
-  f_direct = af_matrix / areas[:, None]
+  f_direct = np.divide(
+      af_matrix,
+      areas[:, None],
+      out=np.zeros_like(af_matrix),
+      where=areas[:, None] > 0.0,
+  )
 
   # 4. Specular reflection from the circular floor reflector (REFLECTOR_TOP)
   # for both the finite KILN_BOTTOM disk and KILN_SIDE patches onto walls
@@ -694,7 +699,7 @@ def compute_view_factors(
   # Deduct specularly redirected rays from the direct view factor to
   # REFLECTOR_TOP (retaining at least the absorbed fraction eps_reflector_top)
   # so that reflected photons are not double-counted in row sums.
-  if ref_ids.size == 1:
+  if ref_ids.size == 1 and params.r_reflector > 0.0:
     r_id = int(ref_ids[0])
     mirror_row_sum = np.sum(f_mirror, axis=1)
     f_direct_to_ref_rem = np.maximum(

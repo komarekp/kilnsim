@@ -462,7 +462,7 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
           centroid=(xc, yc, zc),
           normal=(nx, ny, 0.0),
           area=patch_area_kiln,
-          eps=params.eps_kiln,
+          eps=params.eps_kiln_side,
           b_min=(min(xs), min(ys), z0),
           b_max=(max(xs), max(ys), z1),
       )
@@ -474,7 +474,7 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
       centroid=(params.x_kiln_center, params.y_kiln_center, params.z_kiln_top),
       normal=(0.0, 0.0, 1.0),
       area=area_kiln_disk,
-      eps=params.eps_kiln,
+      eps=params.eps_kiln_top,
       b_min=(
           params.x_kiln_center - params.r_kiln,
           params.y_kiln_center - params.r_kiln,
@@ -493,7 +493,7 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
       centroid=(params.x_kiln_center, params.y_kiln_center, params.z_drum_bot),
       normal=(0.0, 0.0, -1.0),
       area=area_kiln_disk,
-      eps=params.eps_kiln,
+      eps=params.eps_kiln_bot,
       b_min=(
           params.x_kiln_center - params.r_kiln,
           params.y_kiln_center - params.r_kiln,
@@ -598,6 +598,14 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
   r_pad_sensor = params.r_reflector + 0.005
   diag_inv = 1.0 / math.sqrt(2.0)
   floor_sensors = {
+      "pad_center": FloorSensorPoint(
+          name="pad_center",
+          position_m=(
+              params.x_kiln_center,
+              params.y_kiln_center,
+              params.z_pad_top,
+          ),
+      ),
       "pad_edge_corner": FloorSensorPoint(
           name="pad_edge_corner",
           position_m=(

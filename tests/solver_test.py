@@ -137,9 +137,9 @@ class SolverAndMetricsTest(absltest.TestCase):
         m.floor_under_reflector_safe and m.floor_outside_reflector_safe,
     )
 
-    self.assertGreater(m.t_gypsum_max_left_c, metrics_lib.LIMIT_GYPSUM_C)
-    self.assertGreater(m.t_gypsum_max_back_c, metrics_lib.LIMIT_GYPSUM_C)
-    self.assertFalse(m.gypsum_safe)
+    self.assertBetween(m.t_gypsum_max_left_c, 35.0, metrics_lib.LIMIT_GYPSUM_C)
+    self.assertBetween(m.t_gypsum_max_back_c, 35.0, metrics_lib.LIMIT_GYPSUM_C)
+    self.assertTrue(m.gypsum_safe)
 
     self.assertAlmostEqual(
         m.t_gypsum_max_left_c, m.t_gypsum_max_back_c, delta=1.0
@@ -169,13 +169,14 @@ class SolverAndMetricsTest(absltest.TestCase):
   ) -> None:
     """An SSR mounted at +45 deg is heated by direct specular bounce off the reflector."""
     # Place the SSR box at +45 deg (pointing out into the open room, where its
-    # faces do not look at the corner shields at x = 45 mm or y = 45 mm). Any
-    # radiative heating of the SSR casing from the reflector must come directly
-    # from the overhanging reflector annulus beneath the SSR box. Raising a
+    # faces do not look at the corner shields at x = 45 mm or y = 45 mm). With an
+    # unshielded kiln bottom (u_kiln_bot = 2.0, eps_kiln_bot = 0.60), raising a
     # polished reflector (r = 500 mm, eps = 0.15) closer to the SSR bottom
-    # (g_floor_reflector = 180 mm vs 15 mm) must increase radiative flux into
-    # the SSR casing and raise t_ssr_case_k.
+    # (g_floor_reflector = 180 mm vs 15 mm) increases the specular bounce of
+    # downward kiln-bottom radiation into the SSR casing and raises t_ssr_case_k.
     cfg_low = copy.deepcopy(self.base_pb)
+    cfg_low.thermal.sources.u_kiln_bot = 2.0
+    cfg_low.thermal.emissivities.eps_kiln_bot = 0.60
     cfg_low.geometry.ssr.ssr_angle_deg = 45.0
     cfg_low.geometry.floor.d_reflector_mm = 1000.0
     cfg_low.geometry.floor.w_floor_pad_mm = 1200.0
@@ -448,6 +449,49 @@ class SolverAndMetricsTest(absltest.TestCase):
     self.assertLess(metrics.t_room_upper_c - metrics.t_room_lower_c, 25.0)
     self.assertGreater(t_kiln_front_c, metrics.t_room_upper_c)
     self.assertGreater(t_kiln_front_c, metrics.t_ceiling_max_c)
+
+  def test_no_floor_reflector_and_foil_bottom_insulation_converge(self) -> None:
+    """Simulating d_reflector_mm = 0 converges and foil bottom reduces VIP temp."""
+    cfg_no_ref = copy.deepcopy(self.base_pb)
+    cfg_no_ref.geometry.floor.d_reflector_mm = 0.0
+    cfg_no_ref.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg_no_ref.geometry.floor.g_floor_reflector_mm = 0.0
+    p_foil = params_lib.from_proto(cfg_no_ref)
+    m_foil = mesh_lib.build_mesh(p_foil)
+    vf_foil = vf_lib.compute_view_factors(m_foil, p_foil)
+    sol_foil = solver_lib.solve_thermal_system(m_foil, vf_foil, p_foil)
+    metrics_foil = metrics_lib.compute_safety_metrics(
+        mesh=m_foil, vf_sys=vf_foil, solution=sol_foil, params=p_foil
+    )
+    self.assertTrue(sol_foil.converged)
+    self.assertLess(sol_foil.max_energy_residual_w_m2, 0.5)
+    self.assertGreater(
+        metrics_foil.t_vip_under_reflector_c,
+        self.base_pb.thermal.sources.t_ext_c,
+    )
+
+    # Comparing foil-backed insulated bottom (u_kiln_bot=0.8, eps_kiln_bot=0.15)
+    # against old uninsulated high-emissivity bottom (u_kiln_bot=2.0, eps=0.60)
+    # confirms the foil-backed floor insulation plate significantly lowers floor
+    # and VIP temperatures.
+    cfg_old_bot = copy.deepcopy(cfg_no_ref)
+    cfg_old_bot.thermal.sources.u_kiln_bot = 2.0
+    cfg_old_bot.thermal.emissivities.eps_kiln_bot = 0.60
+    p_old = params_lib.from_proto(cfg_old_bot)
+    m_old = mesh_lib.build_mesh(p_old)
+    vf_old = vf_lib.compute_view_factors(m_old, p_old)
+    sol_old = solver_lib.solve_thermal_system(m_old, vf_old, p_old)
+    metrics_old = metrics_lib.compute_safety_metrics(
+        mesh=m_old, vf_sys=vf_old, solution=sol_old, params=p_old
+    )
+    self.assertLess(
+        metrics_foil.t_vip_under_reflector_c + 15.0,
+        metrics_old.t_vip_under_reflector_c,
+    )
+    self.assertLess(
+        metrics_foil.t_vip_outside_reflector_c + 15.0,
+        metrics_old.t_vip_outside_reflector_c,
+    )
 
 
 if __name__ == "__main__":

@@ -35,6 +35,12 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     self.assertIn("ukiln0.8", point.experiment_name)
     cfg = run_sweep.build_config_proto(point)
     self.assertAlmostEqual(cfg.thermal.sources.u_kiln_side, 0.8)
+    self.assertAlmostEqual(cfg.thermal.sources.u_kiln_bot, 0.8)
+    self.assertAlmostEqual(cfg.thermal.emissivities.eps_kiln_side, 0.60)
+    self.assertAlmostEqual(cfg.thermal.emissivities.eps_kiln_top, 0.85)
+    self.assertAlmostEqual(cfg.thermal.emissivities.eps_kiln_bot, 0.15)
+    self.assertAlmostEqual(cfg.geometry.kiln.h_drum_mm, 595.0)
+    self.assertAlmostEqual(cfg.geometry.kiln.t_lid_mm, 75.0)
     # Use a coarser grid in the unit test for speed.
     cfg.grid.dx_wall_mm = 200.0
     cfg.grid.dz_wall_mm = 200.0

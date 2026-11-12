@@ -209,6 +209,10 @@ def enumerate_sweep_points() -> list[SweepPoint]:
       DOOR_OPEN_VALUES_MM,
       CFM_VALUES,
   ):
+    # Constraint: when there is no floor reflector (d_reflector == 0), only the
+    # zero-gap, zero-CalSil combination is meaningful.
+    if d_refl == 0.0 and (g_refl != 0.0 or t_calsil != 0.0):
+      continue
     # Constraint: if reflector gap < 10 mm, reflector CalSil thickness must be 0.
     if g_refl < 10.0 and t_calsil != 0.0:
       continue
@@ -292,8 +296,8 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
   cfg.geometry.kiln.s_kiln_left_mm = point.s_kiln_mm
   cfg.geometry.kiln.s_kiln_back_mm = point.s_kiln_mm
   cfg.geometry.kiln.d_kiln_mm = 700.0
-  cfg.geometry.kiln.h_drum_mm = 580.0
-  cfg.geometry.kiln.t_lid_mm = 105.0
+  cfg.geometry.kiln.h_drum_mm = 595.0
+  cfg.geometry.kiln.t_lid_mm = 75.0
   cfg.geometry.kiln.h_kiln_base_mm = 210.0
 
   # Bung geometry.
@@ -342,12 +346,14 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
   cfg.thermal.sources.t_ext_c = 20.0
   cfg.thermal.sources.u_kiln_side = point.u_kiln_side
   cfg.thermal.sources.u_kiln_top = 2.00
-  cfg.thermal.sources.u_kiln_bot = 2.00
+  cfg.thermal.sources.u_kiln_bot = point.u_kiln_side
   cfg.thermal.sources.q_bung_open_w = 110.0
   cfg.thermal.sources.q_ssr_internal_w = 18.8
   cfg.thermal.sources.exhaust_fan_cfm = point.exhaust_fan_cfm
 
-  cfg.thermal.emissivities.eps_kiln = 0.60
+  cfg.thermal.emissivities.eps_kiln_side = 0.60
+  cfg.thermal.emissivities.eps_kiln_top = 0.85
+  cfg.thermal.emissivities.eps_kiln_bot = 0.15
   cfg.thermal.emissivities.eps_shield = 0.90
   cfg.thermal.emissivities.eps_gypsum = 0.90
   cfg.thermal.emissivities.eps_aac = 0.88
@@ -475,7 +481,9 @@ thermal {{
   }}
 
   emissivities {{
-    eps_kiln: {cfg.thermal.emissivities.eps_kiln:.2f}
+    eps_kiln_side: {cfg.thermal.emissivities.eps_kiln_side:.2f}
+    eps_kiln_top: {cfg.thermal.emissivities.eps_kiln_top:.2f}
+    eps_kiln_bot: {cfg.thermal.emissivities.eps_kiln_bot:.2f}
     eps_shield: {cfg.thermal.emissivities.eps_shield:.2f}
     eps_gypsum: {cfg.thermal.emissivities.eps_gypsum:.2f}
     eps_aac: {cfg.thermal.emissivities.eps_aac:.2f}

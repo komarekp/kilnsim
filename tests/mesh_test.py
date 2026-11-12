@@ -115,6 +115,27 @@ class MeshTest(absltest.TestCase):
     empty_lookup = self.mesh.find_patch_at_coord(x_m=2.0, y_m=2.0, z_m=1.5)
     self.assertIsNone(empty_lookup)
 
+  def test_kiln_side_lid_and_bottom_patches_use_distinct_emissivities(
+      self,
+  ) -> None:
+    """Verifies KILN_SIDE, KILN_LID, and KILN_BOTTOM get their respective eps."""
+    for p in self.mesh.get_patches_by_type(mesh_lib.SurfaceType.KILN_SIDE):
+      self.assertAlmostEqual(p.emissivity, self.params.eps_kiln_side, places=6)
+
+    lid_patches = self.mesh.get_patches_by_type(mesh_lib.SurfaceType.KILN_LID)
+    self.assertLen(lid_patches, 1)
+    self.assertAlmostEqual(
+        lid_patches[0].emissivity, self.params.eps_kiln_top, places=6
+    )
+
+    bot_patches = self.mesh.get_patches_by_type(
+        mesh_lib.SurfaceType.KILN_BOTTOM
+    )
+    self.assertLen(bot_patches, 1)
+    self.assertAlmostEqual(
+        bot_patches[0].emissivity, self.params.eps_kiln_bot, places=6
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

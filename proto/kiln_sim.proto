@@ -174,8 +174,8 @@ message SimulationConfig {
 
   // Thermal emissivities (dimensionless, 0.0 to 1.0) of all solid surfaces.
   message SurfaceEmissivities {
-    // Emissivity of the stainless steel kiln outer jacket and lid band.
-    double eps_kiln = 1;
+    // Deprecated: use eps_kiln_side, eps_kiln_top, and eps_kiln_bot instead.
+    double eps_kiln = 1 [deprecated = true];
     // Emissivity of the calcium silicate shield board (Promatect-H).
     double eps_shield = 2;
     // Emissivity of paper-faced Class A2 gypsum plasterboard.
@@ -186,6 +186,12 @@ message SimulationConfig {
     double eps_reflector_top = 5;
     // Emissivity of the sheet-metal SSR electrical enclosure.
     double eps_ssr = 6;
+    // Emissivity of the stainless steel kiln outer jacket and lid band.
+    double eps_kiln_side = 7;
+    // Emissivity of the exposed refractory firebrick top face of the kiln lid.
+    double eps_kiln_top = 8;
+    // Emissivity of the downward-facing metal foil on the kiln floor insulation plate.
+    double eps_kiln_bot = 9;
   }
 
   // Thermal conductivities (W/m*K) and envelope U-values (W/m^2*K).

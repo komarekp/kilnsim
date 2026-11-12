@@ -134,7 +134,6 @@ def compute_safety_metrics(
 
   # 3. Floor Under Reflector (directly under the center of the kiln)
   ref_mask = stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
-  t_ref_back_k = float(solution.t_back_k[ref_mask][0])
   r_vip = params.t_vip / params.k_vip
   r_screed = params.t_screed / params.k_screed
   r_pad = (
@@ -143,7 +142,17 @@ def compute_safety_metrics(
   r_sub_total = r_pad + r_screed + r_vip
   u_pad_subfloor = 1.0 / r_sub_total
 
-  if params.g_floor_reflector > 1e-4:
+  if params.r_reflector <= 0.0:
+    t_pad_center_k = _solve_floor_sensor_temp_k(
+        vf_vec=vf_sys.sensor_vf["pad_center"],
+        radiosity_w_m2=solution.radiosity_w_m2,
+        eps_floor=FLOOR_PAD_EMISSIVITY,
+        u_subfloor=u_pad_subfloor,
+        t_amb_k=solution.room.t_room_lower_k,
+        t_ext_k=params.t_ext_k,
+    )
+  elif params.g_floor_reflector > 1e-4:
+    t_ref_back_k = float(solution.t_back_k[ref_mask][0])
     eps_gap = 1.0 / (
         (1.0 / params.eps_shield) + (1.0 / FLOOR_PAD_EMISSIVITY) - 1.0
     )
@@ -159,7 +168,7 @@ def compute_safety_metrics(
         + u_pad_subfloor * params.t_ext_k
     ) / (h_rad_under + H_CONV_UNDER_REFLECTOR_W_M2K + u_pad_subfloor)
   else:
-    t_pad_center_k = t_ref_back_k
+    t_pad_center_k = float(solution.t_back_k[ref_mask][0])
 
   t_floor_pad_under_reflector_c = t_pad_center_k - params_lib.KELVIN_OFFSET
   t_vip_under_ref_k = params.t_ext_k + (

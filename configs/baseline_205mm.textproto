@@ -33,8 +33,8 @@ geometry {
     s_kiln_left_mm: 205.0
     s_kiln_back_mm: 205.0
     d_kiln_mm: 700.0
-    h_drum_mm: 580.0
-    t_lid_mm: 105.0
+    h_drum_mm: 595.0
+    t_lid_mm: 75.0
     h_kiln_base_mm: 210.0
   }
 
@@ -82,14 +82,16 @@ thermal {
     t_ext_c: 20.0
     u_kiln_side: 0.80
     u_kiln_top: 2.00
-    u_kiln_bot: 2.00
+    u_kiln_bot: 0.80
     q_bung_open_w: 110.0
     q_ssr_internal_w: 18.8
     exhaust_fan_cfm: 350.0
   }
 
   emissivities {
-    eps_kiln: 0.60
+    eps_kiln_side: 0.60
+    eps_kiln_top: 0.85
+    eps_kiln_bot: 0.15
     eps_shield: 0.90
     eps_gypsum: 0.90
     eps_aac: 0.88

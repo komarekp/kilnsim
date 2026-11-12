@@ -95,12 +95,16 @@ def compute_natural_convection_h(
   )
   if np.any(up_mask):
     nu_up = 0.15 * np.maximum(ra_l[up_mask], 1.0e4) ** (1.0 / 3.0)
-    h_c[up_mask] = (nu_up * k_air[up_mask]) / char_lengths_m[up_mask]
+    h_c[up_mask] = (nu_up * k_air[up_mask]) / np.maximum(
+        char_lengths_m[up_mask], 0.05
+    )
 
   bot_mask = surface_types == int(mesh_lib.SurfaceType.KILN_BOTTOM)
   if np.any(bot_mask):
     nu_bot = 0.27 * np.maximum(ra_l[bot_mask], 1.0e4) ** 0.25
-    h_c[bot_mask] = (nu_bot * k_air[bot_mask]) / char_lengths_m[bot_mask]
+    h_c[bot_mask] = (nu_bot * k_air[bot_mask]) / np.maximum(
+        char_lengths_m[bot_mask], 0.05
+    )
 
   return np.maximum(2.0, h_c)
 
@@ -215,8 +219,8 @@ def solve_thermal_system(
       (stypes == int(mesh_lib.SurfaceType.KILN_LID))
       | (stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
   ] = (0.5 * params.r_kiln)
-  char_lengths[stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)] = (
-      0.5 * params.r_reflector
+  char_lengths[stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)] = max(
+      0.05, 0.5 * params.r_reflector
   )
   char_lengths[
       (stypes == int(mesh_lib.SurfaceType.SHIELD_LEFT))

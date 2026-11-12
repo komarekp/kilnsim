@@ -115,6 +115,9 @@ class SimParams:
 
   # Surface Emissivities (dimensionless)
   eps_kiln: float
+  eps_kiln_side: float
+  eps_kiln_top: float
+  eps_kiln_bot: float
   eps_shield: float
   eps_gypsum: float
   eps_aac: float
@@ -311,6 +314,11 @@ def validate_params(params: SimParams) -> None:
         "chimney_blockage_fraction must lie within "
         f"[{MIN_BLOCKAGE_FRACTION}, {MAX_BLOCKAGE_FRACTION}]."
     )
+  if params.d_reflector < -1e-9:
+    raise ValueError(
+        f"Reflector diameter d_reflector ({params.d_reflector * M_TO_MM:.1f} mm) "
+        "must be >= 0.0 mm."
+    )
   if params.g_floor_reflector < MIN_REFLECTOR_GAP_M - 1e-9:
     raise ValueError(
         f"Reflector floor gap g_floor_reflector "
@@ -323,7 +331,7 @@ def validate_params(params: SimParams) -> None:
         f"({params.t_reflector_calsil * M_TO_MM:.1f} mm) must be >= "
         f"{MIN_REFLECTOR_THICKNESS_M * M_TO_MM:.1f} mm."
     )
-  if params.z_reflector_top >= params.z_drum_bot - 1e-9:
+  if params.r_reflector > 0.0 and params.z_reflector_top >= params.z_drum_bot - 1e-9:
     raise ValueError(
         f"Reflector top elevation ({params.z_reflector_top * M_TO_MM:.1f} mm) "
         f"must be strictly below the kiln bottom plate "
@@ -355,7 +363,9 @@ def validate_params(params: SimParams) -> None:
         f"({params.z_kiln_top:.3f} m)."
     )
   for name, eps in [
-      ("eps_kiln", params.eps_kiln),
+      ("eps_kiln_side", params.eps_kiln_side),
+      ("eps_kiln_top", params.eps_kiln_top),
+      ("eps_kiln_bot", params.eps_kiln_bot),
       ("eps_shield", params.eps_shield),
       ("eps_gypsum", params.eps_gypsum),
       ("eps_aac", params.eps_aac),
@@ -484,6 +494,16 @@ def from_proto(config: kiln_sim_pb2.SimulationConfig) -> SimParams:
   d_chimney_eff = d_chimney * (1.0 - blockage)
   u_aac_wall = 1.0 / (R_SI_WALL + (t_aac / cond.k_aac) + R_SE_WALL)
 
+  eps_kiln_side = (
+      emis.eps_kiln_side if emis.eps_kiln_side > 0.0 else emis.eps_kiln
+  )
+  eps_kiln_top = (
+      emis.eps_kiln_top if emis.eps_kiln_top > 0.0 else emis.eps_kiln
+  )
+  eps_kiln_bot = (
+      emis.eps_kiln_bot if emis.eps_kiln_bot > 0.0 else emis.eps_kiln
+  )
+
   params = SimParams(
       experiment_name=config.experiment_name or "unnamed_experiment",
       w_shield_left=w_shield_left,
@@ -540,7 +560,10 @@ def from_proto(config: kiln_sim_pb2.SimulationConfig) -> SimParams:
       q_bung_open_w=sources.q_bung_open_w,
       q_ssr_internal_w=sources.q_ssr_internal_w,
       v_dot_hood_m3_s=sources.exhaust_fan_cfm * CFM_TO_M3_S,
-      eps_kiln=emis.eps_kiln,
+      eps_kiln=eps_kiln_side,
+      eps_kiln_side=eps_kiln_side,
+      eps_kiln_top=eps_kiln_top,
+      eps_kiln_bot=eps_kiln_bot,
       eps_shield=emis.eps_shield,
       eps_gypsum=emis.eps_gypsum,
       eps_aac=emis.eps_aac,

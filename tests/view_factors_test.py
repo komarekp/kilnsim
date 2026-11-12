@@ -401,6 +401,33 @@ class ViewFactorsTest(absltest.TestCase):
     )
     self.assertGreater(vf_ceil_kiln_wide, vf_ceil_kiln_narrow)
 
+  def test_zero_reflector_diameter_conserves_view_factors_without_nans(
+      self,
+  ) -> None:
+    """Setting d_reflector_mm = 0 produces finite, conserved view factors."""
+    cfg_no_ref = copy.deepcopy(self.base_pb)
+    cfg_no_ref.geometry.floor.d_reflector_mm = 0.0
+    cfg_no_ref.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg_no_ref.geometry.floor.g_floor_reflector_mm = 0.0
+    p_no_ref = params_lib.from_proto(cfg_no_ref)
+    m_no_ref = mesh_lib.build_mesh(p_no_ref)
+    vf_no_ref = vf_lib.compute_view_factors(m_no_ref, p_no_ref)
+
+    self.assertFalse(np.any(np.isnan(vf_no_ref.f_eff)))
+    self.assertFalse(np.any(np.isnan(vf_no_ref.f_room)))
+    self.assertTrue(np.all(vf_no_ref.f_eff >= 0.0))
+    row_totals = np.sum(vf_no_ref.f_eff, axis=1) + vf_no_ref.f_room
+    np.testing.assert_allclose(row_totals, 1.0, atol=1e-12)
+
+    bot_id = int(
+        np.flatnonzero(
+            m_no_ref.surface_types == int(mesh_lib.SurfaceType.KILN_BOTTOM)
+        )[0]
+    )
+    # Without a reflector, the pad center directly under the kiln has an
+    # unobstructed view of KILN_BOTTOM.
+    self.assertGreater(float(vf_no_ref.sensor_vf["pad_center"][bot_id]), 0.5)
+
 
 if __name__ == "__main__":
   absltest.main()
