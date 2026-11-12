@@ -224,6 +224,30 @@ class RunSweepAndLoggingTest(unittest.TestCase):
       self.assertIn("t_gypsum_max_left_c", headers)
       self.assertIn("plume_fully_captured", headers)
       self.assertIn("t_ceiling_max_c", headers)
+      self.assertIn("t_kiln_skin_max_c", headers)
+
+      row_dict = dict(zip(headers, lines[1].split(",")))
+      self.assertGreater(float(row_dict["t_kiln_skin_max_c"]), 50.0)
+
+      # Also verify legacy .out.textproto files without t_kiln_skin_max_c in the
+      # metrics block have t_kiln_skin_max_c backfilled from KILN_SIDE patches.
+      out_file = next(output_dir.glob("*.out.textproto"))
+      out_text = out_file.read_text(encoding="utf-8")
+      stripped_text = "\n".join(
+          line
+          for line in out_text.splitlines()
+          if "t_kiln_skin_max_c:" not in line
+      )
+      out_file.write_text(stripped_text + "\n", encoding="utf-8")
+
+      run_sweep.export_sweep_csv(output_dir, csv_path)
+      lines_backfilled = csv_path.read_text(encoding="utf-8").strip().splitlines()
+      row_backfilled = dict(zip(headers, lines_backfilled[1].split(",")))
+      self.assertAlmostEqual(
+          float(row_backfilled["t_kiln_skin_max_c"]),
+          float(row_dict["t_kiln_skin_max_c"]),
+          places=5,
+      )
 
   def test_sweep_parameter_domains_and_skip_well_formed_outputs(self) -> None:
     """Verifies updated parameter domains, output validation, and dry_run."""

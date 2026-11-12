@@ -13,6 +13,7 @@ import itertools
 import os
 import pathlib
 import random
+import re
 import sys
 import time
 from typing import Iterable, Optional, Sequence
@@ -655,7 +656,28 @@ METRIC_COLUMNS: tuple[str, ...] = tuple(
     field.name
     for field in kiln_sim_pb2.SimulationOutput.SafetyMetrics.DESCRIPTOR.fields
     if not field.name.endswith("_safe")
+) + ("t_kiln_skin_max_c",)
+
+_KILN_SIDE_TEMP_RE = re.compile(
+    rb"surface_type:\s*SURFACE_TYPE_KILN_SIDE\n(?:  [^\n]+\n)*?  temp_front_c:\s*([-0-9.eE+]+)"
 )
+
+
+def _extract_kiln_skin_max_c(
+    out_path: pathlib.Path, expected_kiln_patches: int
+) -> float:
+  """Extracts the peak KILN_SIDE front-face temperature (C) from `out_path`."""
+  file_size = out_path.stat().st_size
+  tail_bytes = max(65536, expected_kiln_patches * 512)
+  with out_path.open("rb") as f:
+    if file_size > tail_bytes:
+      f.seek(file_size - tail_bytes)
+    chunk = f.read()
+  temps = [float(m.group(1)) for m in _KILN_SIDE_TEMP_RE.finditer(chunk)]
+  if len(temps) < expected_kiln_patches and file_size > tail_bytes:
+    chunk = out_path.read_bytes()
+    temps = [float(m.group(1)) for m in _KILN_SIDE_TEMP_RE.finditer(chunk)]
+  return max(temps) if temps else 0.0
 
 
 def expected_patch_count(params: params_lib.SimParams) -> int:
@@ -781,7 +803,13 @@ def export_sweep_csv(
           cfg.geometry.hood.d_hood_inlet_mm,
           cfg.geometry.bung.bung_captured,
       ]
-      metric_values = [getattr(metrics, col) for col in METRIC_COLUMNS]
+      n_kiln_patches = max(1, cfg.grid.n_theta_kiln * cfg.grid.n_z_kiln)
+      metric_values = [
+          _extract_kiln_skin_max_c(out_path, n_kiln_patches)
+          if col == "t_kiln_skin_max_c"
+          else getattr(metrics, col)
+          for col in METRIC_COLUMNS
+      ]
       writer.writerow(param_values + metric_values)
       rows_written += 1
 
