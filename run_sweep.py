@@ -83,20 +83,27 @@ _CSV_ONLY = flags.DEFINE_boolean(
     "If True, only aggregate existing .out.textproto files in output_dir into "
     "csv_output without running simulations.",
 )
+_DRY_RUN = flags.DEFINE_boolean(
+    "dry_run",
+    False,
+    "If True, print only the output filenames of the runs that would be "
+    "executed (skipping already-completed well-formed outputs) and exit.",
+)
 
 # Swept parameter domains.
 KILN_STANDOFFS_MM: tuple[float, ...] = (200.0, 300.0)
-PAD_SIZES_MM: tuple[float, ...] = (1200.0, 1400.0)
+U_KILN_SIDE_VALUES: tuple[float, ...] = (0.8, 0.5, 0.3)
+PAD_SIZES_MM: tuple[float, ...] = (1200.0,)
 PAD_THICKNESSES_MM: tuple[float, ...] = (0.0,)
 DOOR_OPEN_VALUES_MM: tuple[float, ...] = (0.0, 150.0, 800.0)
-CFM_VALUES: tuple[float, ...] = (0.0, 350.0, 400.0, 450.0)
+CFM_VALUES: tuple[float, ...] = (350.0, 400.0, 450.0)
 REFLECTOR_DIAMETERS_MM: tuple[float, ...] = (700.0, 800.0, 900.0, 1000.0)
 REFLECTOR_CALSIL_THICKNESSES_MM: tuple[float, ...] = (0.0, 10.0)
 REFLECTOR_GAPS_MM: tuple[float, ...] = (0.0, 5.0, 10.0, 20.0)
 CHIMNEY_DEPTHS_MM: tuple[float, ...] = (0.0,)
 CHIMNEY_GAPS_MM: tuple[float, ...] = (0.0,)
 SHIELD_WIDTHS_MM: tuple[float, ...] = (1200.0,)
-HOOD_INLETS_MM: tuple[float, ...] = (600.0, 700.0, 800.0)
+HOOD_INLETS_MM: tuple[float, ...] = (700.0, 800.0)
 BUNG_CAPTURED_VALUES: tuple[bool, ...] = (True,)
 
 
@@ -124,12 +131,14 @@ class SweepPoint:
   w_shield_mm: float
   d_hood_inlet_mm: float
   bung_captured: bool
+  u_kiln_side: float = 0.8
 
   @property
   def experiment_name(self) -> str:
     """Returns a deterministic experiment identifier and filename stem."""
     return (
         f"standoff{_fmt_num(self.s_kiln_mm)}_"
+        f"ukiln{_fmt_num(self.u_kiln_side)}_"
         f"pad{_fmt_num(self.w_floor_pad_mm)}x{_fmt_num(self.t_floor_pad_mm)}_"
         f"refl{_fmt_num(self.d_reflector_mm)}_"
         f"calsil{_fmt_num(self.t_reflector_calsil_mm)}_"
@@ -170,6 +179,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
   points: list[SweepPoint] = []
   for (
       s_kiln,
+      u_kiln_side,
       w_pad,
       t_pad,
       d_refl,
@@ -184,6 +194,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
       cfm,
   ) in itertools.product(
       KILN_STANDOFFS_MM,
+      U_KILN_SIDE_VALUES,
       PAD_SIZES_MM,
       PAD_THICKNESSES_MM,
       REFLECTOR_DIAMETERS_MM,
@@ -203,6 +214,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
     points.append(
         SweepPoint(
             s_kiln_mm=s_kiln,
+            u_kiln_side=u_kiln_side,
             w_floor_pad_mm=w_pad,
             t_floor_pad_mm=t_pad,
             w_door_open_mm=w_door,
@@ -327,7 +339,7 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
   # Thermal sources, emissivities, and conductivities.
   cfg.thermal.sources.t_internal_c = 1280.0
   cfg.thermal.sources.t_ext_c = 20.0
-  cfg.thermal.sources.u_kiln_side = 0.80
+  cfg.thermal.sources.u_kiln_side = point.u_kiln_side
   cfg.thermal.sources.u_kiln_top = 2.00
   cfg.thermal.sources.u_kiln_bot = 2.00
   cfg.thermal.sources.q_bung_open_w = 110.0
@@ -624,6 +636,7 @@ def _summarize_failures(failed_runs: Sequence[FailedRun], total_runs: int) -> No
 
 SWEEP_PARAM_COLUMNS: tuple[str, ...] = (
     "s_kiln_mm",
+    "u_kiln_side",
     "w_floor_pad_mm",
     "t_floor_pad_mm",
     "w_door_open_mm",
@@ -643,6 +656,73 @@ METRIC_COLUMNS: tuple[str, ...] = tuple(
     for field in kiln_sim_pb2.SimulationOutput.SafetyMetrics.DESCRIPTOR.fields
     if not field.name.endswith("_safe")
 )
+
+
+def expected_patch_count(params: params_lib.SimParams) -> int:
+  """Computes the exact number of discretized patches built for `params`."""
+  n_cols_left = max(1, int(round(params.w_shield_left / params.dx_wall)))
+  n_cols_back = max(1, int(round(params.w_shield_back / params.dx_wall)))
+  n_rows_shield = max(1, int(round(params.h_shield / params.dz_wall)))
+  n_rows_wall = max(1, int(round(params.h_wall / params.dz_wall)))
+
+  gyp_band_width = 1.0
+  x_gyp_start = params.x_shield_left_end
+  x_gyp_end = min(params.l_room, x_gyp_start + gyp_band_width)
+  w_gyp_left = max(params.dx_wall, x_gyp_end - x_gyp_start)
+  n_cols_gyp_left = max(1, int(round(w_gyp_left / params.dx_wall)))
+
+  y_gyp_start = params.y_shield_back_end
+  y_gyp_end = min(params.w_room, y_gyp_start + gyp_band_width)
+  w_gyp_back = max(params.dx_wall, y_gyp_end - y_gyp_start)
+  n_cols_gyp_back = max(1, int(round(w_gyp_back / params.dx_wall)))
+
+  return (
+      (n_cols_left + n_cols_back) * n_rows_shield
+      + (n_cols_gyp_left + n_cols_gyp_back) * n_rows_wall
+      + params.n_theta_kiln * params.n_z_kiln
+      + 6
+  )
+
+
+def is_well_formed_output(
+    out_path: pathlib.Path, params: params_lib.SimParams
+) -> bool:
+  """Returns True if `out_path` is a converged output with all patch sections."""
+  if not out_path.is_file():
+    return False
+  try:
+    data = out_path.read_bytes()
+    idx = data.find(b"\npatches {\n")
+    if idx == -1 or not data.rstrip().endswith(b"}"):
+      return False
+    header_text = data[:idx].decode("utf-8")
+    output_pb = kiln_sim_pb2.SimulationOutput()
+    text_format.Parse(header_text, output_pb)
+    if not output_pb.provenance.converged or not output_pb.HasField("metrics"):
+      return False
+    patch_count = data.count(b"\npatches {\n", idx)
+    return patch_count == expected_patch_count(params)
+  except Exception:  # pylint: disable=broad-exception-caught
+    return False
+
+
+def filter_pending_points(
+    points: Sequence[SweepPoint],
+    output_dir: pathlib.Path,
+    params_override: Optional[params_lib.SimParams] = None,
+) -> list[SweepPoint]:
+  """Filters out sweep points that already have a well-formed output file."""
+  pending: list[SweepPoint] = []
+  for point in points:
+    out_path = output_dir / f"{point.experiment_name}.out.textproto"
+    params = (
+        params_override
+        if params_override is not None
+        else params_lib.from_proto(build_config_proto(point))
+    )
+    if not is_well_formed_output(out_path, params):
+      pending.append(point)
+  return pending
 
 
 def _parse_output_header(
@@ -687,6 +767,7 @@ def export_sweep_csv(
       metrics = output_pb.metrics
       param_values = [
           cfg.geometry.kiln.s_kiln_left_mm,
+          cfg.thermal.sources.u_kiln_side,
           cfg.geometry.floor.w_floor_pad_mm,
           cfg.geometry.floor.t_floor_pad_mm,
           cfg.geometry.room.w_door_open_mm,
@@ -712,11 +793,21 @@ def main(argv: Sequence[str]) -> None:
   if len(argv) > 1:
     raise app.UsageError(f"Unexpected positional arguments: {argv[1:]}")
 
-  io_manager.configure_absl_logging(binary_name="run_sweep")
-
   config_dir = pathlib.Path(_CONFIG_DIR.value)
   output_dir = pathlib.Path(_OUTPUT_DIR.value)
   csv_path = pathlib.Path(_CSV_OUTPUT.value)
+
+  if _DRY_RUN.value:
+    sweep_points = enumerate_sweep_points()
+    if _QUICK.value:
+      max_workers = max(1, _JOBS.value)
+      sweep_points = reservoir_sample_points(sweep_points, 2 * max_workers)
+    pending_points = filter_pending_points(sweep_points, output_dir)
+    for point in pending_points:
+      print(f"{point.experiment_name}.out.textproto")
+    return
+
+  io_manager.configure_absl_logging(binary_name="run_sweep")
 
   if _CSV_ONLY.value:
     export_sweep_csv(output_dir, csv_path)
@@ -725,18 +816,33 @@ def main(argv: Sequence[str]) -> None:
   output_dir.mkdir(parents=True, exist_ok=True)
 
   max_workers = max(1, _JOBS.value)
-  sweep_points = enumerate_sweep_points()
+  all_sweep_points = enumerate_sweep_points()
   if _QUICK.value:
     sample_size = 2 * max_workers
-    total_available = len(sweep_points)
-    sweep_points = reservoir_sample_points(sweep_points, sample_size)
+    total_available = len(all_sweep_points)
+    all_sweep_points = reservoir_sample_points(all_sweep_points, sample_size)
     logging.info(
         "--quick enabled: reservoir-sampled %d/%d configurations "
         "(2 * max_workers=%d).",
-        len(sweep_points),
+        len(all_sweep_points),
         total_available,
         max_workers,
     )
+
+  sweep_points = filter_pending_points(all_sweep_points, output_dir)
+  skipped_count = len(all_sweep_points) - len(sweep_points)
+  if skipped_count > 0:
+    logging.info(
+        "Skipping %d/%d runs that already have well-formed outputs in %s.",
+        skipped_count,
+        len(all_sweep_points),
+        output_dir,
+    )
+
+  if not sweep_points:
+    logging.info("All %d runs are already complete.", len(all_sweep_points))
+    export_sweep_csv(output_dir, csv_path)
+    return
 
   logging.info(
       "Generating %d sweep configurations in %s...",

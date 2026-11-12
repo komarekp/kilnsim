@@ -18,6 +18,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     """Verifies _run_geometry_group solves a config and writes .out.textproto."""
     point = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
+        u_kiln_side=0.8,
         w_floor_pad_mm=1200.0,
         t_floor_pad_mm=0.0,
         w_door_open_mm=150.0,
@@ -31,7 +32,9 @@ class RunSweepAndLoggingTest(unittest.TestCase):
         d_hood_inlet_mm=800.0,
         bung_captured=True,
     )
+    self.assertIn("ukiln0.8", point.experiment_name)
     cfg = run_sweep.build_config_proto(point)
+    self.assertAlmostEqual(cfg.thermal.sources.u_kiln_side, 0.8)
     # Use a coarser grid in the unit test for speed.
     cfg.grid.dx_wall_mm = 200.0
     cfg.grid.dz_wall_mm = 200.0
@@ -94,6 +97,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     """Verifies start logging of experiment_name and dt_room_change in failure msg."""
     point = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
+        u_kiln_side=0.5,
         w_floor_pad_mm=1200.0,
         t_floor_pad_mm=0.0,
         w_door_open_mm=150.0,
@@ -155,6 +159,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     """Verifies CSV export has sweep param columns and non-*_safe metric columns."""
     point = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
+        u_kiln_side=0.3,
         w_floor_pad_mm=1200.0,
         t_floor_pad_mm=0.0,
         w_door_open_mm=150.0,
@@ -193,6 +198,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
 
       expected_param_cols = [
           "s_kiln_mm",
+          "u_kiln_side",
           "w_floor_pad_mm",
           "t_floor_pad_mm",
           "w_door_open_mm",
@@ -218,6 +224,50 @@ class RunSweepAndLoggingTest(unittest.TestCase):
       self.assertIn("t_gypsum_max_left_c", headers)
       self.assertIn("plume_fully_captured", headers)
       self.assertIn("t_ceiling_max_c", headers)
+
+  def test_sweep_parameter_domains_and_skip_well_formed_outputs(self) -> None:
+    """Verifies updated parameter domains, output validation, and dry_run."""
+    all_points = run_sweep.enumerate_sweep_points()
+    self.assertEqual({pt.u_kiln_side for pt in all_points}, {0.8, 0.5, 0.3})
+    self.assertEqual({pt.w_floor_pad_mm for pt in all_points}, {1200.0})
+    self.assertEqual({pt.d_hood_inlet_mm for pt in all_points}, {700.0, 800.0})
+    self.assertEqual(
+        {pt.exhaust_fan_cfm for pt in all_points}, {350.0, 400.0, 450.0}
+    )
+
+    pt1 = all_points[0]
+    pt2 = all_points[1]
+    cfg1 = run_sweep.build_config_proto(pt1)
+    cfg1.grid.dx_wall_mm = 200.0
+    cfg1.grid.dz_wall_mm = 200.0
+    cfg1.grid.n_theta_kiln = 8
+    cfg1.grid.n_z_kiln = 3
+    params1 = run_sweep.params_lib.from_proto(cfg1)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      tmp_path = pathlib.Path(tmp_dir)
+      config_path1 = tmp_path / f"{pt1.experiment_name}.textproto"
+      output_dir = tmp_path / "results"
+      output_dir.mkdir()
+      run_sweep.write_config_textproto(cfg1, config_path1)
+      run_sweep._run_geometry_group([str(config_path1)], str(output_dir))
+
+      out_file1 = output_dir / f"{pt1.experiment_name}.out.textproto"
+      self.assertTrue(run_sweep.is_well_formed_output(out_file1, params1))
+
+      # Truncating a patch section makes it no longer well-formed.
+      corrupted_file = output_dir / f"{pt2.experiment_name}.out.textproto"
+      content = out_file1.read_text(encoding="utf-8")
+      corrupted_file.write_text(
+          content[: content.rfind("patches {")], encoding="utf-8"
+      )
+      self.assertFalse(run_sweep.is_well_formed_output(corrupted_file, params1))
+
+      pending = run_sweep.filter_pending_points(
+          [pt1, pt2], output_dir, params_override=params1
+      )
+      self.assertEqual(pending, [pt2])
+      self.assertIn("dry_run", run_sweep.flags.FLAGS)
 
 
 if __name__ == "__main__":
