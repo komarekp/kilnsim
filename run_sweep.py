@@ -109,8 +109,8 @@ CHIMNEY_DEPTHS_MM: tuple[float, ...] = (0.0,)
 CHIMNEY_GAPS_MM: tuple[float, ...] = (0.0,)
 SHIELD_WIDTHS_MM: tuple[float, ...] = (1200.0,)
 HOOD_INLETS_MM: tuple[float, ...] = (700.0, 800.0)
+HOOD_DROP_MM: tuple[float, ...] = (600.0, 400.0, 150.0)
 BUNG_CAPTURED_VALUES: tuple[bool, ...] = (True,)
-
 
 def _fmt_num(val: float) -> str:
   """Formats a numeric parameter value concisely for filenames."""
@@ -137,6 +137,7 @@ class SweepPoint:
   d_hood_inlet_mm: float
   bung_captured: bool
   u_kiln_side: float = 0.8
+  z_hood_drop_mm: float = 400.0
 
   @property
   def experiment_name(self) -> str:
@@ -149,6 +150,7 @@ class SweepPoint:
         f"calsil{_fmt_num(self.t_reflector_calsil_mm)}_"
         f"gap{_fmt_num(self.g_floor_reflector_mm)}_"
         f"hood{_fmt_num(self.d_hood_inlet_mm)}_"
+        f"hdrop{_fmt_num(self.z_hood_drop_mm)}_"
         f"door{_fmt_num(self.w_door_open_mm)}_"
         f"cfm{_fmt_num(self.exhaust_fan_cfm)}"
     )
@@ -192,6 +194,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
       g_chim,
       w_shield,
       d_hood,
+      z_hood_drop,
       u_kiln_side,
       bung_cap,
       w_door,
@@ -207,6 +210,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
       CHIMNEY_GAPS_MM,
       SHIELD_WIDTHS_MM,
       HOOD_INLETS_MM,
+      HOOD_DROP_MM,
       U_KILN_SIDE_VALUES,
       BUNG_CAPTURED_VALUES,
       DOOR_OPEN_VALUES_MM,
@@ -234,6 +238,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
             g_chimney_mm=g_chim,
             w_shield_mm=w_shield,
             d_hood_inlet_mm=d_hood,
+            z_hood_drop_mm=z_hood_drop,
             bung_captured=bung_cap,
         )
     )
@@ -340,7 +345,7 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
   )
   cfg.geometry.hood.d_hood_inlet_mm = point.d_hood_inlet_mm
   cfg.geometry.hood.d_hood_duct_mm = 150.0
-  cfg.geometry.hood.z_hood_drop_mm = 400.0
+  cfg.geometry.hood.z_hood_drop_mm = point.z_hood_drop_mm
   cfg.geometry.hood.x_hood_mm = x_kiln_center_mm
   cfg.geometry.hood.y_hood_mm = y_kiln_center_mm
 
@@ -678,6 +683,7 @@ SWEEP_PARAM_COLUMNS: tuple[str, ...] = (
     "g_chimney_mm",
     "w_shield_mm",
     "d_hood_inlet_mm",
+    "z_hood_drop_mm",
     "bung_captured",
 )
 
@@ -838,6 +844,7 @@ def export_sweep_csv(
           cfg.geometry.shield.g_floor_mm,
           cfg.geometry.shield.w_shield_left_mm,
           cfg.geometry.hood.d_hood_inlet_mm,
+          cfg.geometry.hood.z_hood_drop_mm,
           cfg.geometry.bung.bung_captured,
       ]
       n_kiln_patches = max(1, cfg.grid.n_theta_kiln * cfg.grid.n_z_kiln)
