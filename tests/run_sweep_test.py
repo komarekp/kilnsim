@@ -262,7 +262,9 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     all_points = run_sweep.enumerate_sweep_points()
     self.assertEqual({pt.u_kiln_side for pt in all_points}, {0.8, 0.5, 0.3})
     self.assertEqual({pt.w_floor_pad_mm for pt in all_points}, {1200.0})
-    self.assertEqual({pt.d_hood_inlet_mm for pt in all_points}, {700.0, 800.0})
+    self.assertEqual(
+        {pt.d_hood_inlet_mm for pt in all_points}, {600.0, 700.0, 800.0}
+    )
     self.assertEqual(run_sweep.HOOD_DROP_MM, (600.0, 400.0, 150.0))
     self.assertEqual(
         {pt.z_hood_drop_mm for pt in all_points}, {600.0, 400.0, 150.0}

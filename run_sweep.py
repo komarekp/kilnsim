@@ -108,7 +108,7 @@ REFLECTOR_GAPS_MM: tuple[float, ...] = (0.0, 20.0)
 CHIMNEY_DEPTHS_MM: tuple[float, ...] = (0.0,)
 CHIMNEY_GAPS_MM: tuple[float, ...] = (0.0,)
 SHIELD_WIDTHS_MM: tuple[float, ...] = (1200.0,)
-HOOD_INLETS_MM: tuple[float, ...] = (700.0, 800.0)
+HOOD_INLETS_MM: tuple[float, ...] = (600, 700.0, 800.0)
 HOOD_DROP_MM: tuple[float, ...] = (600.0, 400.0, 150.0)
 BUNG_CAPTURED_VALUES: tuple[bool, ...] = (True,)
 
