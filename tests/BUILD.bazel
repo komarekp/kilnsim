@@ -75,6 +75,7 @@ py_test(
     srcs = ["solver_test.py"],
     data = ["//:configs"],
     deps = [
+        "//src:constants",
         "//src:io_manager",
         "//src:mesh",
         "//src:metrics",

@@ -9,6 +9,7 @@ import tempfile
 from absl.testing import absltest
 from google.protobuf import text_format
 import numpy as np
+from src import constants
 from src import io_manager
 from src import mesh as mesh_lib
 from src import metrics as metrics_lib
@@ -870,6 +871,55 @@ class SolverAndMetricsTest(absltest.TestCase):
             - sol_cold.room.z_stratification_layer_m
         ),
         0.002,
+    )
+
+  def test_exhaust_duct_temp_includes_hood_enthalpy_and_teed_bung(self) -> None:
+    """Exhaust duct temp equals ambient when off, rises when firing, and includes teed bung heat."""
+    cfg_off = copy.deepcopy(self.base_pb)
+    cfg_off.grid.dx_wall_mm = 200.0
+    cfg_off.grid.dz_wall_mm = 200.0
+    cfg_off.grid.n_theta_kiln = 8
+    cfg_off.grid.n_z_kiln = 3
+    cfg_off.thermal.sources.t_internal_c = 20.0
+    cfg_off.thermal.sources.t_ext_c = 20.0
+    cfg_off.thermal.sources.q_bung_open_w = 0.0
+    cfg_off.thermal.sources.q_ssr_internal_w = 0.0
+    cfg_off.thermal.sources.exhaust_fan_cfm = 400.0
+    cfg_off.geometry.bung.bung_captured = True
+    p_off = params_lib.from_proto(cfg_off)
+    m_off = mesh_lib.build_mesh(p_off)
+    vf_off = vf_lib.compute_view_factors(m_off, p_off)
+    sol_off = solver_lib.solve_thermal_system(m_off, vf_off, p_off)
+    met_off = metrics_lib.compute_safety_metrics(m_off, vf_off, sol_off, p_off)
+    self.assertAlmostEqual(met_off.t_exhaust_duct_c, 20.0, delta=0.05)
+
+    cfg_0 = copy.deepcopy(self.base_pb)
+    cfg_0.grid.dx_wall_mm = 200.0
+    cfg_0.grid.dz_wall_mm = 200.0
+    cfg_0.grid.n_theta_kiln = 8
+    cfg_0.grid.n_z_kiln = 3
+    cfg_0.thermal.sources.exhaust_fan_cfm = 400.0
+    cfg_0.geometry.room.w_door_open_mm = 150.0
+    cfg_0.geometry.bung.bung_captured = True
+    cfg_0.thermal.sources.q_bung_open_w = 0.0
+    p_0 = params_lib.from_proto(cfg_0)
+    m_0 = mesh_lib.build_mesh(p_0)
+    vf_0 = vf_lib.compute_view_factors(m_0, p_0)
+    sol_0 = solver_lib.solve_thermal_system(m_0, vf_0, p_0)
+    met_0 = metrics_lib.compute_safety_metrics(m_0, vf_0, sol_0, p_0)
+    self.assertGreater(met_0.t_exhaust_duct_c, met_0.t_room_lower_c + 1.0)
+
+    cfg_250 = copy.deepcopy(cfg_0)
+    cfg_250.thermal.sources.q_bung_open_w = 250.0
+    p_250 = params_lib.from_proto(cfg_250)
+    sol_250 = solver_lib.solve_thermal_system(m_0, vf_0, p_250)
+    met_250 = metrics_lib.compute_safety_metrics(m_0, vf_0, sol_250, p_250)
+    m_dot_hood = constants.AIR_RHO_REF * sol_0.room.v_dot_hood_eff_m3_s
+    expected_dt = 250.0 / (m_dot_hood * constants.AIR_CP)
+    self.assertAlmostEqual(
+        met_250.t_exhaust_duct_c - met_0.t_exhaust_duct_c,
+        expected_dt,
+        delta=0.05,
     )
 
 

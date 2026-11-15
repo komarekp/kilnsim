@@ -104,6 +104,7 @@ GAUSSIAN_95_RADIUS_MULTIPLIER: float = 2.45
 DOOR_ORIFICE_DISCHARGE_COEFF: float = 0.65
 ROOM_INFILTRATION_AREA_M2: float = 0.005
 FAN_MAX_STATIC_PRESSURE_PA: float = 250.0
+MIN_DUCT_MASS_FLOW_KG_S: float = 1.0e-6
 
 # ---------------------------------------------------------------------------
 # Engineering pass / fail limits (deg C) and floor emissivities

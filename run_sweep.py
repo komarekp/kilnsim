@@ -748,6 +748,11 @@ def is_well_formed_output(
     text_format.Parse(header_text, output_pb)
     if not output_pb.provenance.converged or not output_pb.HasField("metrics"):
       return False
+    if (
+        abs(output_pb.input_config_snapshot.thermal.sources.t_ext_c) > 1e-9
+        and b"t_exhaust_duct_c:" not in data[:idx]
+    ):
+      return False
     patch_count = data.count(b"\npatches {\n", idx)
     return patch_count == expected_patch_count(params)
   except Exception:  # pylint: disable=broad-exception-caught

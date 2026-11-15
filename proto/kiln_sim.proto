@@ -350,6 +350,8 @@ message SimulationOutput {
     double t_ceiling_max_c = 26;
     // True if the peak ceiling surface temperature remains strictly below 40.0 C.
     bool ceiling_safe = 27;
+    // Steady-state mixed air temperature inside the ceiling exhaust duct (C).
+    double t_exhaust_duct_c = 28;
   }
 
   // Resolved thermal state of an individual discretized surface patch.

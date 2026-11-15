@@ -232,10 +232,12 @@ class RunSweepAndLoggingTest(unittest.TestCase):
       self.assertIn("t_gypsum_max_left_c", headers)
       self.assertIn("plume_fully_captured", headers)
       self.assertIn("t_ceiling_max_c", headers)
+      self.assertIn("t_exhaust_duct_c", headers)
       self.assertIn("t_kiln_skin_max_c", headers)
 
       row_dict = dict(zip(headers, lines[1].split(",")))
       self.assertGreater(float(row_dict["t_kiln_skin_max_c"]), 50.0)
+      self.assertGreater(float(row_dict["t_exhaust_duct_c"]), 20.0)
 
       # Also verify legacy .out.textproto files without t_kiln_skin_max_c in the
       # metrics block have t_kiln_skin_max_c backfilled from KILN_SIDE patches.
@@ -300,6 +302,19 @@ class RunSweepAndLoggingTest(unittest.TestCase):
           content[: content.rfind("patches {")], encoding="utf-8"
       )
       self.assertFalse(run_sweep.is_well_formed_output(corrupted_file, params1))
+
+      # Stripping t_exhaust_duct_c from header also marks partial outputs stale.
+      stale_duct_file = output_dir / "stale_no_duct.out.textproto"
+      stale_duct_file.write_text(
+          "\n".join(
+              line
+              for line in content.splitlines()
+              if "t_exhaust_duct_c:" not in line
+          )
+          + "\n",
+          encoding="utf-8",
+      )
+      self.assertFalse(run_sweep.is_well_formed_output(stale_duct_file, params1))
 
       pending = run_sweep.filter_pending_points(
           [pt1, pt2], output_dir, params_override=params1

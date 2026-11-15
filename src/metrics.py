@@ -404,6 +404,19 @@ def compute_safety_metrics(
   )
   ceiling_safe = t_ceiling_max_c < LIMIT_CEILING_C
 
+  # 6b. Exhaust duct mixed air temperature (including teed bung exhaust)
+  q_bung_duct_w = (
+      max(0.0, params.q_bung_open_w) if params.bung_captured else 0.0
+  )
+  m_dot_hood = constants.AIR_RHO_REF * solution.room.v_dot_hood_eff_m3_s
+  if m_dot_hood > constants.MIN_DUCT_MASS_FLOW_KG_S:
+    t_exhaust_duct_k = params.t_ext_k + (
+        solution.room.q_hood_exhaust_w + q_bung_duct_w
+    ) / (m_dot_hood * constants.AIR_CP)
+  else:
+    t_exhaust_duct_k = solution.room.t_room_upper_k
+  t_exhaust_duct_c = t_exhaust_duct_k - params_lib.KELVIN_OFFSET
+
   # 7. Kiln azimuthal skin temperature spread
   kiln_side_mask = stypes == int(mesh_lib.SurfaceType.KILN_SIDE)
   t_kiln_side_c = t_front_c[kiln_side_mask]
@@ -439,6 +452,7 @@ def compute_safety_metrics(
       delta_t_kiln_skin_c=delta_t_kiln_skin_c,
       t_ceiling_max_c=t_ceiling_max_c,
       ceiling_safe=ceiling_safe,
+      t_exhaust_duct_c=t_exhaust_duct_c,
   )
 
 
