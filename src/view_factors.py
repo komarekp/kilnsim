@@ -92,15 +92,13 @@ def _is_segment_blocked_by_reflector_disk(
   blocked = np.zeros(p2.shape[0], dtype=bool)
 
   for z_plane in (params.z_reflector_bot, params.z_reflector_top):
-    # Check rays that cross or originate on z_plane on their way up to p2.
-    # Only strictly upward intersections (t > 1e-6) or rays originating inside
-    # an air-less flush contact (z_reflector_bot == z_pad_top and r <= r_reflector)
-    # are blocked; a ray starting outside the reflector rim on the same horizontal
-    # plane (t == 0, r > r_reflector) is not blocked unless z_plane > p1_z.
+    # Check rays whose endpoints straddle z_plane (in either direction).
+    z_low = np.minimum(p1_arr[:, 2], p2[:, 2])
+    z_high = np.maximum(p1_arr[:, 2], p2[:, 2])
     crosses = (
-        (p1_arr[:, 2] < z_plane - 1e-7)
-        & (p2[:, 2] > z_plane + 1e-7)
-        & (dz > 1e-9)
+        (z_low < z_plane - 1e-7)
+        & (z_high > z_plane + 1e-7)
+        & (np.abs(dz) > 1e-9)
     )
     if not np.any(crosses):
       continue
@@ -253,72 +251,168 @@ def _is_segment_blocked_by_kiln_cylinder(
   return t_end > (t_start + 1e-6)
 
 
+def _sample_disk_quadrature(
+    x_center: float,
+    y_center: float,
+    z_plane: float,
+    r_inner: float,
+    r_outer: float,
+    n_r: int = _KILN_DISK_QUAD_R,
+    n_theta: int = _KILN_DISK_QUAD_THETA,
+) -> tuple[np.ndarray, np.ndarray, float]:
+  """Samples equal-area polar midpoint elements on an annular or full disk."""
+  if r_outer <= r_inner + 1e-9 or n_r <= 0 or n_theta <= 0:
+    return (
+        np.zeros((0, 3), dtype=np.float64),
+        np.zeros((0,), dtype=np.float64),
+        0.0,
+    )
+  k_idx = np.arange(n_r, dtype=np.float64) + 0.5
+  r_vals = np.sqrt(
+      r_inner * r_inner
+      + (r_outer * r_outer - r_inner * r_inner) * (k_idx / n_r)
+  )
+  theta_vals = (
+      2.0 * math.pi * (np.arange(n_theta, dtype=np.float64) + 0.5) / n_theta
+  )
+  rr, tt = np.meshgrid(r_vals, theta_vals, indexing="ij")
+  rr_flat = rr.ravel()
+  tt_flat = tt.ravel()
+  n_sub = rr_flat.size
+  d_area = math.pi * (r_outer * r_outer - r_inner * r_inner) / n_sub
+  sub_coords = np.column_stack([
+      x_center + rr_flat * np.cos(tt_flat),
+      y_center + rr_flat * np.sin(tt_flat),
+      np.full(n_sub, z_plane, dtype=np.float64),
+  ])
+  return sub_coords, rr_flat, d_area
+
+
+def _compute_point_to_disk_vf(
+    pt_coord: np.ndarray,
+    pt_normal: np.ndarray,
+    disk_sub_coords: np.ndarray,
+    d_area_sub: float,
+    disk_nz: float,
+    params: params_lib.SimParams,
+    check_kiln_cyl: bool = False,
+    check_reflector_disk: bool = False,
+) -> float:
+  """Integrates dF_{pt -> disk} over polar sub-elements with ray occlusion."""
+  if disk_sub_coords.shape[0] == 0 or d_area_sub <= 0.0:
+    return 0.0
+
+  r_vec = disk_sub_coords - pt_coord[None, :]
+  dist_sq = np.sum(r_vec * r_vec, axis=1)
+  dist = np.sqrt(np.maximum(dist_sq, 1e-12))
+  cos_pt = np.sum(r_vec * pt_normal[None, :], axis=1) / dist
+  cos_disk = (-r_vec[:, 2] * disk_nz) / dist
+  valid = (cos_pt > 1e-6) & (cos_disk > 1e-6)
+  if not np.any(valid):
+    return 0.0
+
+  if check_kiln_cyl or check_reflector_disk:
+    valid_idx = np.flatnonzero(valid)
+    p1_b = np.broadcast_to(pt_coord, disk_sub_coords[valid_idx].shape)
+    blocked = np.zeros(valid_idx.size, dtype=bool)
+    if check_kiln_cyl:
+      blocked |= _is_segment_blocked_by_kiln_cylinder(
+          p1=disk_sub_coords[valid_idx], p2=p1_b, params=params
+      )
+    if check_reflector_disk:
+      blocked |= _is_segment_blocked_by_reflector_disk(
+          p1=pt_coord, p2=disk_sub_coords[valid_idx], params=params
+      )
+    valid[valid_idx[blocked]] = False
+    if not np.any(valid):
+      return 0.0
+
+  denom = math.pi * dist_sq[valid] + 0.5 * d_area_sub
+  return float(np.sum(cos_pt[valid] * cos_disk[valid] * d_area_sub / denom))
+
+
+def _compute_disk_to_patches_af(
+    disk_sub_coords: np.ndarray,
+    rr_flat: np.ndarray,
+    d_area_sub: float,
+    disk_nz: float,
+    c_cand: np.ndarray,
+    n_cand: np.ndarray,
+    a_cand: np.ndarray,
+    st_cand: np.ndarray,
+    params: params_lib.SimParams,
+    annulus_r_min: float | None = None,
+    check_kiln_cyl: bool = False,
+    check_reflector_disk: bool = False,
+) -> np.ndarray:
+  """Integrates exchange areas A_m * F_{m -> disk} over polar sub-elements."""
+  if disk_sub_coords.shape[0] == 0 or c_cand.shape[0] == 0:
+    return np.zeros(c_cand.shape[0], dtype=np.float64)
+
+  r_vec_mr = disk_sub_coords[None, :, :] - c_cand[:, None, :]
+  dist_sq_mr = np.sum(r_vec_mr * r_vec_mr, axis=2)
+  dist_mr = np.sqrt(np.maximum(dist_sq_mr, 1e-12))
+  cos_m_d = np.sum(r_vec_mr * n_cand[:, None, :], axis=2) / dist_mr
+  cos_disk = (-r_vec_mr[:, :, 2] * disk_nz) / dist_mr
+  vis_mr = (cos_m_d > 1e-6) & (cos_disk > 1e-6)
+
+  if annulus_r_min is not None:
+    annulus_only_rows = (
+        (st_cand == int(mesh_lib.SurfaceType.KILN_SIDE))
+        | (st_cand == int(mesh_lib.SurfaceType.SSR_BOX))
+    )
+    if np.any(annulus_only_rows):
+      vis_mr[annulus_only_rows, :] &= rr_flat[None, :] >= annulus_r_min - 1e-4
+
+  if check_kiln_cyl or check_reflector_disk:
+    vis_m_idx, vis_q_idx = np.nonzero(vis_mr)
+    if vis_m_idx.size > 0:
+      p1_vis = disk_sub_coords[vis_q_idx]
+      p2_vis = c_cand[vis_m_idx]
+      blocked = np.zeros(vis_m_idx.size, dtype=bool)
+      if check_kiln_cyl:
+        blocked |= _is_segment_blocked_by_kiln_cylinder(
+            p1=p1_vis, p2=p2_vis, params=params
+        )
+      if check_reflector_disk:
+        blocked |= _is_segment_blocked_by_reflector_disk(
+            p1=p1_vis, p2=p2_vis, params=params
+        )
+      vis_mr[vis_m_idx[blocked], vis_q_idx[blocked]] = False
+
+  denom_mr = math.pi * dist_sq_mr + 0.5 * (a_cand[:, None] + d_area_sub)
+  af_sub = np.where(
+      vis_mr,
+      cos_m_d * cos_disk * a_cand[:, None] * d_area_sub / denom_mr,
+      0.0,
+  )
+  return np.sum(af_sub, axis=1)
+
+
 def _compute_point_to_kiln_bottom_vf_with_occlusion(
     pt_coord: np.ndarray,
     pt_normal: np.ndarray,
     params: params_lib.SimParams,
 ) -> float:
-  """Integrates the view factor from a floor point to KILN_BOTTOM with occlusion.
-
-  Subdivides the circular kiln bottom disk (at z = z_drum_bot, radius r_kiln,
-  normal (0, 0, -1)) into equal-area polar elements (n_r x n_theta) and sums
-  the differential view factor over all elements whose line of sight to
-  pt_coord is not obstructed by the circular reflector assembly.
-
-  Args:
-    pt_coord: (3,) coordinates of the floor sensor point in metres.
-    pt_normal: (3,) unit normal vector of the floor sensor point.
-    params: Validated SimParams instance.
-
-  Returns:
-    Dimensionless view factor dF_{pt -> KILN_BOTTOM} in [0.0, 1.0].
-  """
+  """Integrates the view factor from a floor point to KILN_BOTTOM with occlusion."""
   if params.r_kiln <= 0.0 or pt_coord[2] >= params.z_drum_bot - 1e-6:
     return 0.0
-
-  # Equal-area radial rings: r_k = r_kiln * sqrt((k + 0.5) / N_r)
-  k_idx = np.arange(_KILN_DISK_QUAD_R, dtype=np.float64) + 0.5
-  r_vals = params.r_kiln * np.sqrt(k_idx / _KILN_DISK_QUAD_R)
-  theta_vals = (
-      2.0
-      * math.pi
-      * (np.arange(_KILN_DISK_QUAD_THETA, dtype=np.float64) + 0.5)
-      / _KILN_DISK_QUAD_THETA
+  sub_coords, _, d_area = _sample_disk_quadrature(
+      x_center=params.x_kiln_center,
+      y_center=params.y_kiln_center,
+      z_plane=params.z_drum_bot,
+      r_inner=0.0,
+      r_outer=params.r_kiln,
   )
-  rr, tt = np.meshgrid(r_vals, theta_vals, indexing="ij")
-  rr_flat = rr.ravel()
-  tt_flat = tt.ravel()
-
-  n_sub = rr_flat.size
-  d_area = (math.pi * (params.r_kiln ** 2)) / n_sub
-  sub_coords = np.column_stack([
-      params.x_kiln_center + rr_flat * np.cos(tt_flat),
-      params.y_kiln_center + rr_flat * np.sin(tt_flat),
-      np.full(n_sub, params.z_drum_bot, dtype=np.float64),
-  ])
-
-  blocked = _is_segment_blocked_by_reflector_disk(
-      p1=pt_coord, p2=sub_coords, params=params
+  return _compute_point_to_disk_vf(
+      pt_coord=pt_coord,
+      pt_normal=pt_normal,
+      disk_sub_coords=sub_coords,
+      d_area_sub=d_area,
+      disk_nz=-1.0,
+      params=params,
+      check_reflector_disk=True,
   )
-  vis_mask = ~blocked
-  if not np.any(vis_mask):
-    return 0.0
-
-  r_vec = sub_coords[vis_mask] - pt_coord[None, :]
-  dist_sq = np.sum(r_vec * r_vec, axis=1)
-  dist = np.sqrt(np.maximum(dist_sq, 1e-12))
-
-  cos_pt = np.sum(r_vec * pt_normal[None, :], axis=1) / dist
-  # Kiln bottom normal is (0, 0, -1), so -dot(r_vec, n_bot) = r_vec[:, 2]
-  cos_bot = r_vec[:, 2] / dist
-
-  valid = (cos_pt > 1e-6) & (cos_bot > 1e-6)
-  if not np.any(valid):
-    return 0.0
-
-  denom = math.pi * dist_sq[valid] + 0.5 * d_area
-  vf_sub = cos_pt[valid] * cos_bot[valid] * d_area / denom
-  return float(np.sum(vf_sub))
 
 
 def _compute_point_to_patches_vf(
@@ -397,6 +491,7 @@ def compute_view_factors(
 
   # 3. Override coaxial disk pair (KILN_BOTTOM <-> REFLECTOR_TOP)
   bot_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+  lid_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_LID))
   ref_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP))
   ssr_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.SSR_BOX))
   if bot_ids.size == 1 and ref_ids.size == 1:
@@ -417,75 +512,111 @@ def compute_view_factors(
   if ref_ids.size == 1 and params.r_reflector > 0.0:
     r_id = int(ref_ids[0])
     b_id_exclusion = int(bot_ids[0]) if bot_ids.size == 1 else -1
-    # Clear the unoccluded single-centroid approximation for non-bottom patches
     for m_idx in range(n_patches):
       if m_idx != b_id_exclusion and m_idx != r_id:
         af_matrix[m_idx, r_id] = 0.0
         af_matrix[r_id, m_idx] = 0.0
 
-    k_ref = np.arange(_KILN_DISK_QUAD_R, dtype=np.float64) + 0.5
-    r_ref_vals = params.r_reflector * np.sqrt(k_ref / _KILN_DISK_QUAD_R)
-    theta_ref_vals = (
-        2.0
-        * math.pi
-        * (np.arange(_KILN_DISK_QUAD_THETA, dtype=np.float64) + 0.5)
-        / _KILN_DISK_QUAD_THETA
+    ref_sub_coords, rr_ref_flat, d_area_ref = _sample_disk_quadrature(
+        x_center=params.x_kiln_center,
+        y_center=params.y_kiln_center,
+        z_plane=params.z_reflector_top,
+        r_inner=0.0,
+        r_outer=params.r_reflector,
     )
-    rr_ref, tt_ref = np.meshgrid(r_ref_vals, theta_ref_vals, indexing="ij")
-    rr_ref_flat = rr_ref.ravel()
-    tt_ref_flat = tt_ref.ravel()
-    n_ref_sub = rr_ref_flat.size
-    d_area_ref = areas[r_id] / n_ref_sub
-    ref_sub_coords = np.column_stack([
-        params.x_kiln_center + rr_ref_flat * np.cos(tt_ref_flat),
-        params.y_kiln_center + rr_ref_flat * np.sin(tt_ref_flat),
-        np.full(n_ref_sub, params.z_reflector_top, dtype=np.float64),
-    ])
-
-    cand_mask = (
+    cand_mask_ref = (
         (c[:, 2] > params.z_reflector_top + 1e-4)
         & (stypes != int(mesh_lib.SurfaceType.REFLECTOR_TOP))
         & (stypes != int(mesh_lib.SurfaceType.KILN_BOTTOM))
         & (stypes != int(mesh_lib.SurfaceType.KILN_LID))
     )
-    cand_ids = np.flatnonzero(cand_mask)
-    if cand_ids.size > 0:
-      c_cand = c[cand_ids]
-      n_cand = n_vec[cand_ids]
-      a_cand = areas[cand_ids]
-      st_cand = stypes[cand_ids]
+    cand_ids_ref = np.flatnonzero(cand_mask_ref)
+    if cand_ids_ref.size > 0:
+      af_cand_ref = _compute_disk_to_patches_af(
+          disk_sub_coords=ref_sub_coords,
+          rr_flat=rr_ref_flat,
+          d_area_sub=d_area_ref,
+          disk_nz=1.0,
+          c_cand=c[cand_ids_ref],
+          n_cand=n_vec[cand_ids_ref],
+          a_cand=areas[cand_ids_ref],
+          st_cand=stypes[cand_ids_ref],
+          params=params,
+          annulus_r_min=params.r_kiln,
+          check_kiln_cyl=True,
+      )
+      af_matrix[cand_ids_ref, r_id] = af_cand_ref
+      af_matrix[r_id, cand_ids_ref] = af_cand_ref
 
-      r_vec_mr = ref_sub_coords[None, :, :] - c_cand[:, None, :]
-      dist_sq_mr = np.sum(r_vec_mr * r_vec_mr, axis=2)
-      dist_mr = np.sqrt(np.maximum(dist_sq_mr, 1e-12))
-      cos_m_r = np.sum(r_vec_mr * n_cand[:, None, :], axis=2) / dist_mr
-      cos_ref = -r_vec_mr[:, :, 2] / dist_mr
-      vis_mr = (cos_m_r > 1e-6) & (cos_ref > 1e-6)
-      annulus_only_rows = (
-          (st_cand == int(mesh_lib.SurfaceType.KILN_SIDE))
-          | (st_cand == int(mesh_lib.SurfaceType.SSR_BOX))
+  # 3c. Finite-disk diffuse exchange between KILN_LID and patches above lid.
+  if lid_ids.size == 1 and params.r_kiln > 0.0:
+    lid_id = int(lid_ids[0])
+    af_matrix[:, lid_id] = 0.0
+    af_matrix[lid_id, :] = 0.0
+    lid_sub_coords, rr_lid_flat, d_area_lid = _sample_disk_quadrature(
+        x_center=params.x_kiln_center,
+        y_center=params.y_kiln_center,
+        z_plane=params.z_kiln_top,
+        r_inner=0.0,
+        r_outer=params.r_kiln,
+    )
+    cand_mask_lid = (c[:, 2] > params.z_kiln_top + 1e-4) & (
+        stypes != int(mesh_lib.SurfaceType.KILN_LID)
+    )
+    cand_ids_lid = np.flatnonzero(cand_mask_lid)
+    if cand_ids_lid.size > 0:
+      af_cand_lid = _compute_disk_to_patches_af(
+          disk_sub_coords=lid_sub_coords,
+          rr_flat=rr_lid_flat,
+          d_area_sub=d_area_lid,
+          disk_nz=1.0,
+          c_cand=c[cand_ids_lid],
+          n_cand=n_vec[cand_ids_lid],
+          a_cand=areas[cand_ids_lid],
+          st_cand=stypes[cand_ids_lid],
+          params=params,
       )
-      if np.any(annulus_only_rows):
-        vis_mr[annulus_only_rows, :] &= (
-            rr_ref_flat[None, :] >= params.r_kiln - 1e-4
-        )
-      vis_m_idx, vis_q_idx = np.nonzero(vis_mr)
-      if vis_m_idx.size > 0:
-        blocked_cyl = _is_segment_blocked_by_kiln_cylinder(
-            p1=ref_sub_coords[vis_q_idx],
-            p2=c_cand[vis_m_idx],
-            params=params,
-        )
-        vis_mr[vis_m_idx[blocked_cyl], vis_q_idx[blocked_cyl]] = False
-      denom_mr = math.pi * dist_sq_mr + 0.5 * (a_cand[:, None] + d_area_ref)
-      af_sub = np.where(
-          vis_mr,
-          cos_m_r * cos_ref * a_cand[:, None] * d_area_ref / denom_mr,
-          0.0,
+      af_matrix[cand_ids_lid, lid_id] = af_cand_lid
+      af_matrix[lid_id, cand_ids_lid] = af_cand_lid
+
+  # 3d. Finite-disk diffuse exchange between KILN_BOTTOM and non-reflector
+  # patches below z_drum_bot, accounting for occlusion by the floor reflector.
+  if bot_ids.size == 1 and params.r_kiln > 0.0:
+    b_id = int(bot_ids[0])
+    r_id_exclusion = int(ref_ids[0]) if ref_ids.size == 1 else -1
+    for m_idx in range(n_patches):
+      if m_idx != r_id_exclusion and m_idx != b_id:
+        af_matrix[m_idx, b_id] = 0.0
+        af_matrix[b_id, m_idx] = 0.0
+
+    bot_sub_coords, rr_bot_flat, d_area_bot = _sample_disk_quadrature(
+        x_center=params.x_kiln_center,
+        y_center=params.y_kiln_center,
+        z_plane=params.z_drum_bot,
+        r_inner=0.0,
+        r_outer=params.r_kiln,
+    )
+    cand_mask_bot = (
+        (c[:, 2] < params.z_drum_bot - 1e-4)
+        & (stypes != int(mesh_lib.SurfaceType.KILN_BOTTOM))
+        & (stypes != int(mesh_lib.SurfaceType.REFLECTOR_TOP))
+    )
+    cand_ids_bot = np.flatnonzero(cand_mask_bot)
+    if cand_ids_bot.size > 0:
+      af_cand_bot = _compute_disk_to_patches_af(
+          disk_sub_coords=bot_sub_coords,
+          rr_flat=rr_bot_flat,
+          d_area_sub=d_area_bot,
+          disk_nz=-1.0,
+          c_cand=c[cand_ids_bot],
+          n_cand=n_vec[cand_ids_bot],
+          a_cand=areas[cand_ids_bot],
+          st_cand=stypes[cand_ids_bot],
+          params=params,
+          check_reflector_disk=True,
       )
-      af_cand_ref = np.sum(af_sub, axis=1)
-      af_matrix[cand_ids, r_id] = af_cand_ref
-      af_matrix[r_id, cand_ids] = af_cand_ref
+      af_matrix[cand_ids_bot, b_id] = af_cand_bot
+      af_matrix[b_id, cand_ids_bot] = af_cand_bot
 
   f_direct = np.divide(
       af_matrix,
@@ -524,24 +655,16 @@ def compute_view_factors(
     # 4a. Specular reflection of the finite KILN_BOTTOM disk (at z = z_mirror)
     if bot_ids.size == 1:
       b_id = int(bot_ids[0])
-      k_idx = np.arange(_KILN_DISK_QUAD_R, dtype=np.float64) + 0.5
-      r_vals = params.r_kiln * np.sqrt(k_idx / _KILN_DISK_QUAD_R)
-      theta_vals = (
-          2.0
-          * math.pi
-          * (np.arange(_KILN_DISK_QUAD_THETA, dtype=np.float64) + 0.5)
-          / _KILN_DISK_QUAD_THETA
+      img_coords_b, rr_b_flat, d_area_b = _sample_disk_quadrature(
+          x_center=params.x_kiln_center,
+          y_center=params.y_kiln_center,
+          z_plane=params.z_mirror,
+          r_inner=0.0,
+          r_outer=params.r_kiln,
       )
-      rr_b, tt_b = np.meshgrid(r_vals, theta_vals, indexing="ij")
-      rr_b_flat = rr_b.ravel()
-      tt_b_flat = tt_b.ravel()
-      n_sub_b = rr_b_flat.size
-      d_area_b = areas[b_id] / n_sub_b
-      img_coords_b = np.column_stack([
-          params.x_kiln_center + rr_b_flat * np.cos(tt_b_flat),
-          params.y_kiln_center + rr_b_flat * np.sin(tt_b_flat),
-          np.full(n_sub_b, params.z_mirror, dtype=np.float64),
-      ])
+      r_vals = rr_b_flat.reshape(
+          _KILN_DISK_QUAD_R, _KILN_DISK_QUAD_THETA
+      )[:, 0]
 
       # Specular self-return F_{KILN_BOTTOM -> KILN_BOTTOM | reflector}.
       dz_bot_ref = params.z_drum_bot - params.z_reflector_top
@@ -830,6 +953,7 @@ def compute_ceiling_sensor_vfs(
   areas = mesh.areas
   stypes = mesh.surface_types
   bot_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+  lid_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_LID))
   ref_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP))
 
   diag_inv = 1.0 / math.sqrt(2.0)
@@ -858,12 +982,36 @@ def compute_ceiling_sensor_vfs(
       ),
   }
   pt_n_ceil = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-  exclude_ceil = (stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM)) | (
-      stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
+  exclude_ceil = (
+      (stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+      | (stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP))
+      | (stypes == int(mesh_lib.SurfaceType.KILN_LID))
   )
   kiln_side_ids_ceil = np.flatnonzero(
       stypes == int(mesh_lib.SurfaceType.KILN_SIDE)
   )
+  lid_sub_coords, _, d_area_lid = _sample_disk_quadrature(
+      x_center=params.x_kiln_center,
+      y_center=params.y_kiln_center,
+      z_plane=params.z_kiln_top,
+      r_inner=0.0,
+      r_outer=params.r_kiln,
+  )
+  ann_coords, _, d_area_ann = _sample_disk_quadrature(
+      x_center=params.x_kiln_center,
+      y_center=params.y_kiln_center,
+      z_plane=params.z_reflector_top,
+      r_inner=params.r_kiln,
+      r_outer=params.r_reflector,
+  )
+  img_coords_b, _, d_area_b = _sample_disk_quadrature(
+      x_center=params.x_kiln_center,
+      y_center=params.y_kiln_center,
+      z_plane=params.z_mirror,
+      r_inner=0.0,
+      r_outer=params.r_kiln,
+  )
+
   ceil_sensor_vf: dict[str, np.ndarray] = {}
   for name, coord in ceiling_points.items():
     pt_c = np.array(coord, dtype=np.float64)
@@ -875,58 +1023,26 @@ def compute_ceiling_sensor_vfs(
         patch_areas=areas,
         exclude_mask=exclude_ceil,
     )
+    if lid_ids.size == 1 and params.r_kiln > 0.0:
+      vf_vec[int(lid_ids[0])] = _compute_point_to_disk_vf(
+          pt_coord=pt_c,
+          pt_normal=pt_n_ceil,
+          disk_sub_coords=lid_sub_coords,
+          d_area_sub=d_area_lid,
+          disk_nz=1.0,
+          params=params,
+      )
     if ref_ids.size == 1 and params.r_reflector > params.r_kiln + 1e-4:
       r_id = int(ref_ids[0])
-      r_inner = params.r_kiln
-      r_outer = params.r_reflector
-      k_ann = np.arange(_KILN_DISK_QUAD_R, dtype=np.float64) + 0.5
-      r_ann = np.sqrt(
-          r_inner * r_inner
-          + (r_outer * r_outer - r_inner * r_inner)
-          * (k_ann / _KILN_DISK_QUAD_R)
+      vf_ceil_ref_direct = _compute_point_to_disk_vf(
+          pt_coord=pt_c,
+          pt_normal=pt_n_ceil,
+          disk_sub_coords=ann_coords,
+          d_area_sub=d_area_ann,
+          disk_nz=1.0,
+          params=params,
+          check_kiln_cyl=True,
       )
-      theta_ann = (
-          2.0
-          * math.pi
-          * (np.arange(_KILN_DISK_QUAD_THETA, dtype=np.float64) + 0.5)
-          / _KILN_DISK_QUAD_THETA
-      )
-      rr_a, tt_a = np.meshgrid(r_ann, theta_ann, indexing="ij")
-      rr_a_flat = rr_a.ravel()
-      tt_a_flat = tt_a.ravel()
-      n_ann = rr_a_flat.size
-      d_area_ann = (
-          math.pi * (r_outer * r_outer - r_inner * r_inner)
-      ) / n_ann
-      ann_coords = np.column_stack([
-          params.x_kiln_center + rr_a_flat * np.cos(tt_a_flat),
-          params.y_kiln_center + rr_a_flat * np.sin(tt_a_flat),
-          np.full(n_ann, params.z_reflector_top, dtype=np.float64),
-      ])
-      blocked_ann = _is_segment_blocked_by_kiln_cylinder(
-          p1=ann_coords, p2=np.broadcast_to(pt_c, ann_coords.shape), params=params
-      )
-      vis_ann = ~blocked_ann
-      vf_ceil_ref_direct = 0.0
-      if np.any(vis_ann):
-        r_vec_ca = ann_coords[vis_ann] - pt_c[None, :]
-        dist_sq_ca = np.sum(r_vec_ca * r_vec_ca, axis=1)
-        dist_ca = np.sqrt(np.maximum(dist_sq_ca, 1e-12))
-        cos_ceil = -r_vec_ca[:, 2] / dist_ca
-        cos_ref_a = -r_vec_ca[:, 2] / dist_ca
-        valid_ca = (cos_ceil > 1e-6) & (cos_ref_a > 1e-6)
-        if np.any(valid_ca):
-          denom_ca = (
-              math.pi * dist_sq_ca[valid_ca] + 0.5 * d_area_ann
-          )
-          vf_ceil_ref_direct = float(
-              np.sum(
-                  cos_ceil[valid_ca]
-                  * cos_ref_a[valid_ca]
-                  * d_area_ann
-                  / denom_ca
-              )
-          )
 
       if params.rho_reflector_top > 0.0:
         # (i) Specular bounce from KILN_SIDE virtual images to ceiling sensor
@@ -994,26 +1110,8 @@ def compute_ceiling_sensor_vfs(
               vf_vec[kiln_side_ids_ceil] += mirror_ks_contrib
 
         # (ii) Specular bounce from finite KILN_BOTTOM virtual image disk to ceiling
-        if bot_ids.size == 1:
+        if bot_ids.size == 1 and img_coords_b.shape[0] > 0:
           b_id = int(bot_ids[0])
-          k_idx = np.arange(_KILN_DISK_QUAD_R, dtype=np.float64) + 0.5
-          r_vals = params.r_kiln * np.sqrt(k_idx / _KILN_DISK_QUAD_R)
-          theta_vals = (
-              2.0
-              * math.pi
-              * (np.arange(_KILN_DISK_QUAD_THETA, dtype=np.float64) + 0.5)
-              / _KILN_DISK_QUAD_THETA
-          )
-          rr_b, tt_b = np.meshgrid(r_vals, theta_vals, indexing="ij")
-          rr_b_flat = rr_b.ravel()
-          tt_b_flat = tt_b.ravel()
-          n_sub_b = rr_b_flat.size
-          d_area_b = areas[b_id] / n_sub_b
-          img_coords_b = np.column_stack([
-              params.x_kiln_center + rr_b_flat * np.cos(tt_b_flat),
-              params.y_kiln_center + rr_b_flat * np.sin(tt_b_flat),
-              np.full(n_sub_b, params.z_mirror, dtype=np.float64),
-          ])
           r_c_to_b = img_coords_b - pt_c[None, :]
           d_sq_cb = np.sum(r_c_to_b * r_c_to_b, axis=1)
           d_cb = np.sqrt(np.maximum(d_sq_cb, 1e-12))

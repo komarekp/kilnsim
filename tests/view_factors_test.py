@@ -1,6 +1,7 @@
 """Unit tests for kiln_sim.view_factors."""
 
 import copy
+import math
 import os
 import pathlib
 
@@ -427,6 +428,87 @@ class ViewFactorsTest(absltest.TestCase):
     # Without a reflector, the pad center directly under the kiln has an
     # unobstructed view of KILN_BOTTOM.
     self.assertGreater(float(vf_no_ref.sensor_vf["pad_center"][bot_id]), 0.5)
+
+  def test_kiln_lid_to_ceiling_sensor_matches_coaxial_disk_formula(
+      self,
+  ) -> None:
+    """Ceiling sensor view of KILN_LID matches exact differential-to-disk formula."""
+    cfg = copy.deepcopy(self.base_pb)
+    # z_kiln_top = 20 + 210 + 595 + 75 = 900 mm; h_wall = 1400 mm -> h = 0.50 m
+    cfg.geometry.room.h_wall_mm = 1400.0
+    cfg.geometry.hood.z_hood_drop_mm = 0.0
+    cfg.geometry.hood.d_hood_inlet_mm = 20.0
+    cfg.geometry.hood.d_hood_duct_mm = 20.0
+    # Place ceiling_hood_rim_corner coaxially at (x_kiln_center, y_kiln_center).
+    # r_ceil_sensor = r_hood_inlet + 10 mm = 20 mm.
+    r_ceil_mm = 0.5 * cfg.geometry.hood.d_hood_inlet_mm + 10.0
+    offset_mm = r_ceil_mm / math.sqrt(2.0)
+    p0 = params_lib.from_proto(self.base_pb)
+    cfg.geometry.hood.x_hood_mm = p0.x_kiln_center * 1e3 + offset_mm
+    cfg.geometry.hood.y_hood_mm = p0.y_kiln_center * 1e3 + offset_mm
+
+    params = params_lib.from_proto(cfg)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+    lid_id = int(
+        np.flatnonzero(mesh.surface_types == int(mesh_lib.SurfaceType.KILN_LID))[0]
+    )
+    h = params.h_wall - params.z_kiln_top
+    vf_exact = (params.r_kiln ** 2) / (params.r_kiln ** 2 + h * h)
+    vf_got = float(vf_sys.sensor_vf["ceiling_hood_rim_corner"][lid_id])
+    self.assertAlmostEqual(vf_got, vf_exact, delta=0.005)
+
+  def test_kiln_lid_to_nearby_upper_wall_uses_finite_disk_quadrature(
+      self,
+  ) -> None:
+    """View factor between KILN_LID and nearby upper wall matches polar quadrature."""
+    p = self.params
+    stypes = self.mesh.surface_types
+    lid_id = int(np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_LID))[0])
+    shield_left_ids = np.flatnonzero(
+        stypes == int(mesh_lib.SurfaceType.SHIELD_LEFT)
+    )
+    # Pick a SHIELD_LEFT patch just above z_kiln_top opposite the kiln center.
+    c_sl = self.mesh.centroids[shield_left_ids]
+    target_z = p.z_kiln_top + 0.05
+    idx = int(
+        np.argmin(
+            (c_sl[:, 0] - p.x_kiln_center) ** 2 + (c_sl[:, 2] - target_z) ** 2
+        )
+    )
+    wall_id = int(shield_left_ids[idx])
+    pt = self.mesh.centroids[wall_id]
+    n_w = self.mesh.normals[wall_id]
+    a_w = self.mesh.areas[wall_id]
+
+    # Fine 64 x 192 equal-area polar disk reference over KILN_LID.
+    n_r, n_t = 64, 192
+    r_vals = p.r_kiln * np.sqrt((np.arange(n_r) + 0.5) / n_r)
+    t_vals = 2.0 * math.pi * (np.arange(n_t) + 0.5) / n_t
+    rr, tt = np.meshgrid(r_vals, t_vals, indexing="ij")
+    sub = np.column_stack([
+        p.x_kiln_center + rr.ravel() * np.cos(tt.ravel()),
+        p.y_kiln_center + rr.ravel() * np.sin(tt.ravel()),
+        np.full(n_r * n_t, p.z_kiln_top),
+    ])
+    d_area = (math.pi * p.r_kiln * p.r_kiln) / (n_r * n_t)
+    r_vec = sub - pt[None, :]
+    d_sq = np.sum(r_vec * r_vec, axis=1)
+    d = np.sqrt(d_sq)
+    cos_w = np.sum(r_vec * n_w[None, :], axis=1) / d
+    cos_l = -r_vec[:, 2] / d
+    valid = (cos_w > 1e-6) & (cos_l > 1e-6)
+    vf_ref = float(
+        np.sum(
+            cos_w[valid]
+            * cos_l[valid]
+            * d_area
+            / (math.pi * d_sq[valid] + 0.5 * (a_w + d_area))
+        )
+    )
+
+    vf_got = float(self.vf_sys.f_eff[wall_id, lid_id])
+    self.assertAlmostEqual(vf_got, vf_ref, delta=0.05 * vf_ref)
 
 
 if __name__ == "__main__":

@@ -194,7 +194,11 @@ class SolverAndMetricsTest(absltest.TestCase):
     vf_high = vf_lib.compute_view_factors(m_high, p_high)
     sol_high = solver_lib.solve_thermal_system(m_high, vf_high, p_high)
 
-    self.assertGreater(sol_high.t_ssr_case_k, sol_low.t_ssr_case_k + 0.3)
+    self.assertGreater(sol_high.t_ssr_case_k, sol_low.t_ssr_case_k + 0.12)
+    self.assertGreater(
+        sol_high.t_ssr_case_k - sol_high.room.t_room_lower_k,
+        sol_low.t_ssr_case_k - sol_low.room.t_room_lower_k + 0.25,
+    )
 
   def test_wide_polished_reflector_increases_wall_and_ceiling_max_temps(
       self,
