@@ -265,6 +265,126 @@ class PlumeRoomTest(absltest.TestCase):
       )
       self.assertAlmostEqual(q_in, q_out, delta=1e-4)
 
+  def test_undersized_exhaust_duct_throttles_effective_blower_flow(
+      self,
+  ) -> None:
+    """Narrowing the exhaust duct from 200 mm to 100 mm throttles blower flow."""
+    cfg_200 = copy.deepcopy(self.base_pb)
+    cfg_200.geometry.room.w_door_open_mm = 900.0
+    cfg_200.geometry.hood.d_hood_duct_mm = 200.0
+    cfg_200.thermal.sources.exhaust_fan_cfm = 400.0
+    p_200, m_200, tf_200, qc_200, ch_200 = self._make_plume_inputs(
+        cfg_200, q_kiln_flux=400.0
+    )
+    sol_200 = plume_room_lib.solve_plume_and_room(
+        mesh=m_200,
+        t_front_k=tf_200,
+        q_conv_front_w_m2=qc_200,
+        chimney=ch_200,
+        t_lower_prev_k=p_200.t_ext_k,
+        params=p_200,
+    )
+
+    cfg_100 = copy.deepcopy(cfg_200)
+    cfg_100.geometry.hood.d_hood_duct_mm = 100.0
+    p_100, m_100, tf_100, qc_100, ch_100 = self._make_plume_inputs(
+        cfg_100, q_kiln_flux=400.0
+    )
+    sol_100 = plume_room_lib.solve_plume_and_room(
+        mesh=m_100,
+        t_front_k=tf_100,
+        q_conv_front_w_m2=qc_100,
+        chimney=ch_100,
+        t_lower_prev_k=p_100.t_ext_k,
+        params=p_100,
+    )
+
+    self.assertLess(
+        sol_100.v_dot_hood_eff_m3_s, 0.70 * sol_200.v_dot_hood_eff_m3_s
+    )
+
+  def test_inward_makeup_air_velocity_suppresses_doorway_buoyancy_outflow(
+      self,
+  ) -> None:
+    """High inward doorway makeup velocity floods/blocks buoyant top backflow."""
+    cfg_narrow = copy.deepcopy(self.base_pb)
+    cfg_narrow.geometry.room.w_door_open_mm = 120.0
+    cfg_narrow.geometry.hood.d_hood_inlet_mm = 400.0
+    cfg_narrow.geometry.hood.z_hood_drop_mm = 150.0
+    cfg_narrow.thermal.sources.exhaust_fan_cfm = 400.0
+    p_n, m_n, tf_n, qc_n, ch_n = self._make_plume_inputs(
+        cfg_narrow, q_kiln_flux=600.0
+    )
+    sol_narrow = plume_room_lib.solve_plume_and_room(
+        mesh=m_n,
+        t_front_k=tf_n,
+        q_conv_front_w_m2=qc_n,
+        chimney=ch_n,
+        t_lower_prev_k=p_n.t_ext_k,
+        params=p_n,
+    )
+
+    cfg_wide = copy.deepcopy(cfg_narrow)
+    cfg_wide.geometry.room.w_door_open_mm = 1800.0
+    p_w, m_w, tf_w, qc_w, ch_w = self._make_plume_inputs(
+        cfg_wide, q_kiln_flux=600.0
+    )
+    sol_wide = plume_room_lib.solve_plume_and_room(
+        mesh=m_w,
+        t_front_k=tf_w,
+        q_conv_front_w_m2=qc_w,
+        chimney=ch_w,
+        t_lower_prev_k=p_w.t_ext_k,
+        params=p_w,
+    )
+
+    self.assertGreater(sol_narrow.t_room_upper_k, p_n.t_ext_k + 0.5)
+    self.assertLess(sol_narrow.m_dot_door_buoy_kg_s, 1e-6)
+    self.assertGreater(sol_wide.m_dot_door_buoy_kg_s, 0.001)
+
+  def test_surplus_hood_suction_extends_capture_reach_on_narrow_hood(
+      self,
+  ) -> None:
+    """Increasing blower flow beyond V_plume increases capture even with eta_vol=1."""
+    cfg_matched = copy.deepcopy(self.base_pb)
+    cfg_matched.geometry.room.w_door_open_mm = 1200.0
+    cfg_matched.geometry.hood.d_hood_inlet_mm = 600.0
+    cfg_matched.geometry.hood.z_hood_drop_mm = 150.0
+    cfg_matched.thermal.sources.exhaust_fan_cfm = 300.0
+    p_m, m_m, tf_m, qc_m, ch_m = self._make_plume_inputs(
+        cfg_matched, q_kiln_flux=150.0
+    )
+    sol_matched = plume_room_lib.solve_plume_and_room(
+        mesh=m_m,
+        t_front_k=tf_m,
+        q_conv_front_w_m2=qc_m,
+        chimney=ch_m,
+        t_lower_prev_k=p_m.t_ext_k,
+        params=p_m,
+    )
+
+    cfg_surplus = copy.deepcopy(cfg_matched)
+    cfg_surplus.thermal.sources.exhaust_fan_cfm = 600.0
+    p_s, m_s, tf_s, qc_s, ch_s = self._make_plume_inputs(
+        cfg_surplus, q_kiln_flux=150.0
+    )
+    sol_surplus = plume_room_lib.solve_plume_and_room(
+        mesh=m_s,
+        t_front_k=tf_s,
+        q_conv_front_w_m2=qc_s,
+        chimney=ch_s,
+        t_lower_prev_k=p_s.t_ext_k,
+        params=p_s,
+    )
+
+    self.assertGreater(
+        sol_matched.v_dot_hood_eff_m3_s, sol_matched.v_dot_plume_at_hood_m3_s
+    )
+    self.assertGreater(
+        sol_surplus.plume_capture_fraction,
+        sol_matched.plume_capture_fraction + 0.05,
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

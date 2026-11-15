@@ -48,6 +48,23 @@ class RoomSolution:
   q_hood_exhaust_w: float = 0.0
 
 
+def _duct_quadratic_resistance(d_duct_m: float, r_inlet_m: float) -> float:
+  """Returns quadratic pressure-drop coeff dP / V_dot^2 (Pa*s^2/m^6)."""
+  d_eff = max(0.01, d_duct_m)
+  r_eff = max(0.05, r_inlet_m)
+  a_duct = math.pi * ((0.5 * d_eff) ** 2)
+  a_inlet = math.pi * (r_eff ** 2)
+  k_total = (
+      constants.HOOD_ENTRY_LOSS_COEFF
+      + constants.DUCT_FRICTION_FACTOR
+      * (constants.DUCT_EQUIV_LENGTH_M / d_eff)
+      + constants.DUCT_EXIT_LOSS_COEFF
+  )
+  return 0.5 * constants.AIR_RHO_REF * (
+      k_total / (a_duct ** 2) + 1.0 / (a_inlet ** 2)
+  )
+
+
 def _solve_zone_conductance_system(
     ua_upper: float,
     ua_lower: float,
@@ -120,24 +137,31 @@ def solve_plume_and_room(
   q_bung_w = 0.0 if params.bung_captured else params.q_bung_open_w
   q_plume_total_w = max(0.0, q_kiln_conv_w + q_bung_w)
 
-  # Effective hood volumetric exhaust flow throttled by makeup-air starvation.
+  # Effective hood volumetric exhaust flow from parabolic fan P-Q curve against
+  # makeup-air starvation and hood/duct resistance relative to reference ducting.
   a_makeup = (
       constants.ROOM_INFILTRATION_AREA_M2
       + constants.DOOR_ORIFICE_DISCHARGE_COEFF
       * params.w_door_open
       * params.h_door
   )
-  v_dot_max_makeup = a_makeup * math.sqrt(
-      2.0 * constants.FAN_MAX_STATIC_PRESSURE_PA / constants.AIR_RHO_REF
+  r_makeup = 0.5 * constants.AIR_RHO_REF / (a_makeup ** 2)
+  r_duct = _duct_quadratic_resistance(params.d_hood_duct, params.r_hood_inlet)
+  r_duct_ref = _duct_quadratic_resistance(
+      constants.DEFAULT_HOOD_DUCT_DIAMETER_MM * 1e-3,
+      constants.HOOD_REF_INLET_RADIUS_M,
   )
-  v_dot_hood_eff = (
-      0.0
-      if params.v_dot_hood_m3_s <= 0.0
-      else params.v_dot_hood_m3_s
-      / math.sqrt(
-          1.0 + (params.v_dot_hood_m3_s / max(v_dot_max_makeup, 1e-9)) ** 2
-      )
-  )
+  if params.v_dot_hood_m3_s <= 0.0:
+    v_dot_hood_eff = 0.0
+  else:
+    v_nom = params.v_dot_hood_m3_s
+    denom_sq = max(
+        0.25,
+        1.0
+        + ((r_makeup + r_duct - r_duct_ref) * (v_nom ** 2))
+        / constants.FAN_MAX_STATIC_PRESSURE_PA,
+    )
+    v_dot_hood_eff = v_nom / math.sqrt(denom_sq)
   m_dot_hood = constants.AIR_RHO_REF * v_dot_hood_eff
 
   if q_plume_total_w <= 1e-9:
@@ -193,7 +217,18 @@ def solve_plume_and_room(
       r_bung_overhang = max(0.0, params.r_bung - params.r_kiln)
       r_plume_95 += 0.35 * r_bung_overhang
 
-    if params.r_hood_inlet >= r_plume_95:
+    # Surplus hood suction bends outer plume streamlines inward toward the rim.
+    surplus_ratio = max(
+        0.0,
+        (v_dot_hood_eff - v_dot_plume_m3_s) / max(v_dot_plume_m3_s, 1e-6),
+    )
+    suction_frac = min(
+        constants.HOOD_SUCTION_MAX_FRAC,
+        constants.HOOD_SUCTION_REACH_COEFF * math.sqrt(surplus_ratio),
+    )
+    r_cap_eff = params.r_hood_inlet * (1.0 + suction_frac)
+
+    if r_cap_eff >= r_plume_95:
       eta_geom = 1.0
     else:
       sigma_r = max(0.05, r_plume_95 / constants.GAUSSIAN_95_RADIUS_MULTIPLIER)
@@ -202,8 +237,7 @@ def solve_plume_and_room(
       )
       eta_geom = min(
           1.0,
-          (1.0 - math.exp(-0.5 * ((params.r_hood_inlet / sigma_r) ** 2)))
-          / norm_95,
+          (1.0 - math.exp(-0.5 * ((r_cap_eff / sigma_r) ** 2))) / norm_95,
       )
 
     if v_dot_hood_eff <= 0.0:
@@ -216,7 +250,7 @@ def solve_plume_and_room(
       eta_plume = min(eta_plume, m_dot_hood / m_dot_plume_kg_s)
     plume_fully_captured = (
         (v_dot_hood_eff >= v_dot_plume_m3_s)
-        and (params.r_hood_inlet >= r_plume_95)
+        and (r_cap_eff >= r_plume_95)
     )
 
   # 6. Behind-shield chimney capture fraction.
@@ -309,22 +343,33 @@ def solve_plume_and_room(
   )
 
   h_upper_door = max(0.05, params.h_door - z_layer)
+  a_door_open = max(0.0, params.w_door_open * params.h_door)
+  v_door_inflow = v_dot_hood_eff / a_door_open if a_door_open > 1e-6 else 0.0
   dt_upper = 0.5
   dt_lower = 0.2
   m_dot_door_buoy = 0.0
   g_overturn = 0.0
 
   def _exchange_rates(dt_u_val: float, dt_l_val: float) -> tuple[float, float]:
-    v_door_buoy = constants.DOOR_ORIFICE_DISCHARGE_COEFF * math.sqrt(
-        constants.GRAVITY * h_upper_door * (max(0.0, dt_u_val) / params.t_ext_k)
-    )
-    m_door = (
-        0.5
-        * constants.AIR_RHO_REF
-        * params.w_door_open
-        * h_upper_door
-        * v_door_buoy
-    )
+    if params.w_door_open <= 0.0 or params.h_door <= 0.0 or dt_u_val <= 0.0:
+      m_door = 0.0
+    else:
+      v_buoy_wave = math.sqrt(
+          constants.GRAVITY * h_upper_door * (dt_u_val / params.t_ext_k)
+      )
+      v_crit = constants.DOOR_FLOODING_FROUDE_COEFF * v_buoy_wave
+      flood_factor = max(
+          0.0, 1.0 - (v_door_inflow / max(v_crit, 1e-6)) ** 2
+      )
+      v_door_buoy = constants.DOOR_ORIFICE_DISCHARGE_COEFF * v_buoy_wave
+      m_door = (
+          0.5
+          * constants.AIR_RHO_REF
+          * params.w_door_open
+          * h_upper_door
+          * v_door_buoy
+          * flood_factor
+      )
     g_ov = (
         constants.AIR_RHO_REF
         * constants.AIR_CP

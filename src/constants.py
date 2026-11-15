@@ -109,6 +109,14 @@ DOOR_ORIFICE_DISCHARGE_COEFF: float = 0.65
 ROOM_INFILTRATION_AREA_M2: float = 0.005
 FAN_MAX_STATIC_PRESSURE_PA: float = 250.0
 MIN_DUCT_MASS_FLOW_KG_S: float = 1.0e-6
+HOOD_ENTRY_LOSS_COEFF: float = 0.25
+DUCT_FRICTION_FACTOR: float = 0.020
+DUCT_EQUIV_LENGTH_M: float = 3.0
+DUCT_EXIT_LOSS_COEFF: float = 1.0
+HOOD_REF_INLET_RADIUS_M: float = 0.40
+DOOR_FLOODING_FROUDE_COEFF: float = 0.55
+HOOD_SUCTION_REACH_COEFF: float = 0.22
+HOOD_SUCTION_MAX_FRAC: float = 0.60
 
 # ---------------------------------------------------------------------------
 # Engineering pass / fail limits (deg C) and floor emissivities
