@@ -97,6 +97,8 @@ HESKESTAD_VIRTUAL_ORIGIN_HEAT_COEFF: float = 0.083
 GAUSSIAN_PLUME_SPREAD_COEFF: float = 0.12
 GAUSSIAN_95_RADIUS_MULTIPLIER: float = 2.45
 DOOR_ORIFICE_DISCHARGE_COEFF: float = 0.65
+ROOM_INFILTRATION_AREA_M2: float = 0.005
+FAN_MAX_STATIC_PRESSURE_PA: float = 250.0
 
 # ---------------------------------------------------------------------------
 # Engineering pass / fail limits (deg C) and floor emissivities

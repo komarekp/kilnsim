@@ -48,6 +48,35 @@ class RoomSolution:
   q_hood_exhaust_w: float = 0.0
 
 
+def _solve_zone_conductance_system(
+    ua_upper: float,
+    ua_lower: float,
+    m_dot_door_buoy: float,
+    m_hood_upper: float,
+    m_cap_total: float,
+    m_dot_spill: float,
+    g_overturn: float,
+    q_u_rhs: float,
+    q_l_rhs: float,
+) -> tuple[float, float]:
+  """Solves the linear 2-zone room energy conductance matrix for (dT_u, dT_l)."""
+  m_l_to_u = max(m_dot_spill, m_hood_upper + m_dot_door_buoy)
+  m_u_to_l = max(0.0, m_dot_spill - (m_hood_upper + m_dot_door_buoy))
+
+  g_u_out = ua_upper + (m_hood_upper + m_dot_door_buoy) * constants.AIR_CP
+  g_l_out = ua_lower + m_cap_total * constants.AIR_CP
+  g_ul = m_u_to_l * constants.AIR_CP + g_overturn
+  g_lu = m_l_to_u * constants.AIR_CP + g_overturn
+
+  det = (g_u_out + g_ul) * (g_l_out + g_lu) - g_ul * g_lu
+  if det > 1e-9:
+    dt_u = ((g_l_out + g_lu) * q_u_rhs + g_lu * q_l_rhs) / det
+    dt_l = (g_ul * q_u_rhs + (g_u_out + g_ul) * q_l_rhs) / det
+    return dt_u, dt_l
+  dt_fallback = (q_u_rhs + q_l_rhs) / max(g_u_out + g_l_out, 1.0)
+  return dt_fallback, dt_fallback
+
+
 def solve_plume_and_room(
     mesh: mesh_lib.SurfaceMesh,
     t_front_k: np.ndarray,
@@ -55,6 +84,9 @@ def solve_plume_and_room(
     chimney: chimney_lib.ChimneySolution,
     t_lower_prev_k: float,
     params: params_lib.SimParams,
+    q_rad_room_patch_w: np.ndarray | None = None,
+    q_ssr_louver_w: float = 0.0,
+    q_under_ref_conv_w: float = 0.0,
 ) -> RoomSolution:
   """Solves the corner-modified MTT plume, hood capture, and 2-zone room model.
 
@@ -65,10 +97,15 @@ def solve_plume_and_room(
     chimney: Solved ChimneySolution for the current iteration.
     t_lower_prev_k: Current lower-zone air temperature estimate (K).
     params: Validated SimParams instance.
+    q_rad_room_patch_w: Optional (N_patches,) net radiative heat transfer from
+      each patch to the unmeshed room enclosure (W).
+    q_ssr_louver_w: Net internal SSR enclosure air heat exhausted into room (W).
+    q_under_ref_conv_w: Net under-reflector gap convection to lower room air (W).
 
   Returns:
     Populated RoomSolution instance.
   """
+  del t_front_k  # Convective fluxes already carry solved surface temperatures.
   stypes = mesh.surface_types
   areas = mesh.areas
 
@@ -83,91 +120,107 @@ def solve_plume_and_room(
   q_bung_w = 0.0 if params.bung_captured else params.q_bung_open_w
   q_plume_total_w = max(0.0, q_kiln_conv_w + q_bung_w)
 
-  # Handle the unheated / kiln-turned-off limit cleanly:
-  if q_plume_total_w <= 1e-3:
-    return RoomSolution(
-        q_plume_conv_w=0.0,
-        v_dot_plume_at_hood_m3_s=0.0,
-        r_plume_at_hood_m=0.0,
-        m_eff_corner=1.0,
-        plume_fully_captured=True,
-        plume_capture_fraction=1.0,
-        chimney_capture_fraction=1.0,
-        t_room_upper_k=params.t_ext_k,
-        t_room_lower_k=params.t_ext_k,
-        z_stratification_layer_m=params.z_hood_inlet,
-        t_plume_at_hood_k=params.t_ext_k,
-    )
-
-  # 2. Virtual origin z_v of an area source of diameter d_kiln (Heskestad / MTT)
-  q_kw = q_plume_total_w * 1e-3
-  z_v = (
-      params.z_kiln_top
-      - constants.HESKESTAD_VIRTUAL_ORIGIN_DIAM_COEFF * params.d_kiln
-      + constants.HESKESTAD_VIRTUAL_ORIGIN_HEAT_COEFF * (q_kw ** (2.0 / 5.0))
+  # Effective hood volumetric exhaust flow throttled by makeup-air starvation.
+  a_makeup = (
+      constants.ROOM_INFILTRATION_AREA_M2
+      + constants.DOOR_ORIFICE_DISCHARGE_COEFF
+      * params.w_door_open
+      * params.h_door
   )
-  dz_plume = max(0.15, params.z_hood_inlet - z_v)
-
-  # 3. Hasemi / Mowrer-Williamson corner standoff image multiplier m_eff(z).
-  s_eff = min(params.s_kiln_left, params.s_kiln_back) + params.r_kiln
-  b_gaussian = constants.GAUSSIAN_PLUME_SPREAD_COEFF * dz_plume
-  m_eff = 1.0 + 3.0 * math.exp(-((s_eff / max(b_gaussian, 1e-3)) ** 2))
-
-  # 4. Corner-modified MTT volumetric plume flow rate at z = z_hood_inlet.
-  q_eff_kw = q_kw * m_eff
-  m_dot_plume_kg_s = (
-      constants.MTT_PLUME_FLOW_COEFF
-      * (q_eff_kw ** (1.0 / 3.0))
-      * (dz_plume ** (5.0 / 3.0))
-      + constants.MTT_SOURCE_ENTRAINMENT_COEFF
-      * (q_eff_kw ** (1.0 / 3.0))
-      * params.d_kiln
-  ) / m_eff
-  dt_plume_mean = q_plume_total_w / (
-      max(m_dot_plume_kg_s, 1e-4) * constants.AIR_CP
+  v_dot_max_makeup = a_makeup * math.sqrt(
+      2.0 * constants.FAN_MAX_STATIC_PRESSURE_PA / constants.AIR_RHO_REF
   )
-  t_plume_at_hood_k = t_lower_prev_k + dt_plume_mean
-  rho_plume = constants.AIR_RHO_REF * (
-      t_lower_prev_k / (t_lower_prev_k + dt_plume_mean)
+  v_dot_hood_eff = (
+      0.0
+      if params.v_dot_hood_m3_s <= 0.0
+      else params.v_dot_hood_m3_s
+      / math.sqrt(
+          1.0 + (params.v_dot_hood_m3_s / max(v_dot_max_makeup, 1e-9)) ** 2
+      )
   )
-  v_dot_plume_m3_s = m_dot_plume_kg_s / max(rho_plume, 0.5)
+  m_dot_hood = constants.AIR_RHO_REF * v_dot_hood_eff
 
-  # 5. Geometric capture radius at the hood mouth.
-  hood_offset = math.hypot(
-      params.x_hood - params.x_kiln_center,
-      params.y_hood - params.y_kiln_center,
-  )
-  r_plume_95 = 1.65 * b_gaussian + hood_offset
-  if not params.bung_captured:
-    r_bung_overhang = max(0.0, params.r_bung - params.r_kiln)
-    r_plume_95 += 0.35 * r_bung_overhang
-
-  if params.r_hood_inlet >= r_plume_95:
-    eta_geom = 1.0
+  if q_plume_total_w <= 1e-9:
+    q_plume_total_w = 0.0
+    m_eff = 1.0
+    m_dot_plume_kg_s = 0.0
+    t_plume_at_hood_k = t_lower_prev_k
+    v_dot_plume_m3_s = 0.0
+    r_plume_95 = 0.0
+    eta_plume = 1.0
+    plume_fully_captured = True
   else:
-    sigma_r = max(0.05, r_plume_95 / constants.GAUSSIAN_95_RADIUS_MULTIPLIER)
-    norm_95 = 1.0 - math.exp(
-        -0.5 * (constants.GAUSSIAN_95_RADIUS_MULTIPLIER ** 2)
+    # 2. Virtual origin z_v of an area source of diameter d_kiln (Heskestad/MTT)
+    q_kw = q_plume_total_w * 1e-3
+    z_v = (
+        params.z_kiln_top
+        - constants.HESKESTAD_VIRTUAL_ORIGIN_DIAM_COEFF * params.d_kiln
+        + constants.HESKESTAD_VIRTUAL_ORIGIN_HEAT_COEFF * (q_kw ** (2.0 / 5.0))
     )
-    eta_geom = min(
-        1.0,
-        (1.0 - math.exp(-0.5 * ((params.r_hood_inlet / sigma_r) ** 2)))
-        / norm_95,
+    dz_plume = max(0.15, params.z_hood_inlet - z_v)
+
+    # 3. Hasemi / Mowrer-Williamson corner standoff image multiplier m_eff(z).
+    s_eff = min(params.s_kiln_left, params.s_kiln_back) + params.r_kiln
+    b_gaussian = constants.GAUSSIAN_PLUME_SPREAD_COEFF * dz_plume
+    m_eff = 1.0 + 3.0 * math.exp(-((s_eff / max(b_gaussian, 1e-3)) ** 2))
+
+    # 4. Corner-modified MTT volumetric plume flow rate at z = z_hood_inlet.
+    q_eff_kw = q_kw * m_eff
+    m_dot_plume_kg_s = (
+        constants.MTT_PLUME_FLOW_COEFF
+        * (q_eff_kw ** (1.0 / 3.0))
+        * (dz_plume ** (5.0 / 3.0))
+        + constants.MTT_SOURCE_ENTRAINMENT_COEFF
+        * (q_eff_kw ** (1.0 / 3.0))
+        * params.d_kiln
+    ) / m_eff
+    dt_plume_mean = q_plume_total_w / (
+        max(m_dot_plume_kg_s, 1e-4) * constants.AIR_CP
     )
+    t_plume_at_hood_k = t_lower_prev_k + dt_plume_mean
+    rho_plume = constants.AIR_RHO_REF * (
+        t_lower_prev_k / max(100.0, t_lower_prev_k + dt_plume_mean)
+    )
+    v_dot_plume_m3_s = m_dot_plume_kg_s / max(rho_plume, 0.5)
 
-  if params.v_dot_hood_m3_s <= 0.0:
-    eta_vol = 0.0
-  else:
-    eta_vol = min(1.0, params.v_dot_hood_m3_s / max(v_dot_plume_m3_s, 1e-5))
+    # 5. Geometric capture radius at the hood mouth.
+    hood_offset = math.hypot(
+        params.x_hood - params.x_kiln_center,
+        params.y_hood - params.y_kiln_center,
+    )
+    r_plume_95 = 1.65 * b_gaussian + hood_offset
+    if not params.bung_captured:
+      r_bung_overhang = max(0.0, params.r_bung - params.r_kiln)
+      r_plume_95 += 0.35 * r_bung_overhang
 
-  eta_plume = eta_geom * eta_vol
-  plume_fully_captured = (
-      (params.v_dot_hood_m3_s >= v_dot_plume_m3_s)
-      and (params.r_hood_inlet >= r_plume_95)
-  )
+    if params.r_hood_inlet >= r_plume_95:
+      eta_geom = 1.0
+    else:
+      sigma_r = max(0.05, r_plume_95 / constants.GAUSSIAN_95_RADIUS_MULTIPLIER)
+      norm_95 = 1.0 - math.exp(
+          -0.5 * (constants.GAUSSIAN_95_RADIUS_MULTIPLIER ** 2)
+      )
+      eta_geom = min(
+          1.0,
+          (1.0 - math.exp(-0.5 * ((params.r_hood_inlet / sigma_r) ** 2)))
+          / norm_95,
+      )
+
+    if v_dot_hood_eff <= 0.0:
+      eta_vol = 0.0
+    else:
+      eta_vol = min(1.0, v_dot_hood_eff / max(v_dot_plume_m3_s, 1e-5))
+
+    eta_plume = eta_geom * eta_vol
+    if m_dot_plume_kg_s > 0.0:
+      eta_plume = min(eta_plume, m_dot_hood / m_dot_plume_kg_s)
+    plume_fully_captured = (
+        (v_dot_hood_eff >= v_dot_plume_m3_s)
+        and (params.r_hood_inlet >= r_plume_95)
+    )
 
   # 6. Behind-shield chimney capture fraction.
-  v_dot_surplus = max(0.0, params.v_dot_hood_m3_s - eta_plume * v_dot_plume_m3_s)
+  v_dot_surplus = max(0.0, v_dot_hood_eff - eta_plume * v_dot_plume_m3_s)
   v_dot_chimney = chimney.m_dot_total_kg_s / constants.AIR_RHO_REF
   z_shield_top = params.h_wall - params.g_ceil
   dist_wall_to_hood_rim = max(
@@ -198,26 +251,17 @@ def solve_plume_and_room(
         velocity_capture_ratio * vol_capture_ratio * elevation_factor
     )
 
+  m_cap_plume = eta_plume * m_dot_plume_kg_s
+  if chimney.m_dot_total_kg_s > 0.0:
+    eta_chimney = min(
+        eta_chimney,
+        max(0.0, m_dot_hood - m_cap_plume) / chimney.m_dot_total_kg_s,
+    )
+  m_cap_chim = eta_chimney * chimney.m_dot_total_kg_s
+  m_cap_total = m_cap_plume + m_cap_chim
+  m_hood_upper = max(0.0, m_dot_hood - m_cap_total)
+
   # 7. Two-Zone Room Energy & Doorway Buoyancy Exchange Balance.
-  shield_gyp_mask = (
-      (stypes == int(mesh_lib.SurfaceType.SHIELD_LEFT))
-      | (stypes == int(mesh_lib.SurfaceType.SHIELD_BACK))
-      | (stypes == int(mesh_lib.SurfaceType.GYPSUM_LEFT))
-      | (stypes == int(mesh_lib.SurfaceType.GYPSUM_BACK))
-  )
-  q_wall_front_conv_w = float(
-      np.sum(
-          np.maximum(0.0, q_conv_front_w_m2[shield_gyp_mask])
-          * areas[shield_gyp_mask]
-      )
-  )
-
-  q_spill_upper_w = (
-      (1.0 - eta_plume) * q_plume_total_w
-      + (1.0 - eta_chimney) * chimney.q_conv_total_w
-      + 0.65 * q_wall_front_conv_w
-  )
-
   m_dot_spill = (
       (1.0 - eta_plume) * m_dot_plume_kg_s
       + (1.0 - eta_chimney) * chimney.m_dot_total_kg_s
@@ -236,59 +280,104 @@ def solve_plume_and_room(
 
   ua_upper = params.compute_ua_upper_zone(z_layer)
   ua_lower = params.compute_ua_lower_zone(z_layer)
-  q_upper_heating_w = 0.92 * q_spill_upper_w
-  q_lower_heating_w = 0.35 * q_wall_front_conv_w + 0.08 * q_spill_upper_w
 
+  upper_mask = mesh.centroids[:, 2] >= z_layer
+  q_conv_nonplume_w = np.where(
+      kiln_mask,
+      np.minimum(0.0, q_conv_front_w_m2) * areas,
+      q_conv_front_w_m2 * areas,
+  )
+  q_rad_vec = (
+      np.zeros_like(areas) if q_rad_room_patch_w is None else q_rad_room_patch_w
+  )
+  z_ssr_mid = 0.5 * (params.z_ssr_bot + params.z_ssr_top)
+  q_ssr_upper_w = q_ssr_louver_w if z_ssr_mid >= z_layer else 0.0
+  q_ssr_lower_w = q_ssr_louver_w - q_ssr_upper_w
+
+  q_u_rhs = (
+      (1.0 - eta_plume) * q_plume_total_w
+      + (1.0 - eta_chimney) * chimney.q_conv_total_w
+      + float(np.sum(q_conv_nonplume_w[upper_mask]))
+      + float(np.sum(q_rad_vec[upper_mask]))
+      + q_ssr_upper_w
+  )
+  q_l_rhs = (
+      float(np.sum(q_conv_nonplume_w[~upper_mask]))
+      + float(np.sum(q_rad_vec[~upper_mask]))
+      + q_ssr_lower_w
+      + q_under_ref_conv_w
+  )
+
+  h_upper_door = max(0.05, params.h_door - z_layer)
   dt_upper = 0.5
   dt_lower = 0.2
-  for _ in range(12):
-    h_upper_door = max(0.05, params.h_door - z_layer)
+  m_dot_door_buoy = 0.0
+  g_overturn = 0.0
+
+  def _exchange_rates(dt_u_val: float, dt_l_val: float) -> tuple[float, float]:
     v_door_buoy = constants.DOOR_ORIFICE_DISCHARGE_COEFF * math.sqrt(
-        constants.GRAVITY * h_upper_door * (max(0.0, dt_upper) / params.t_ext_k)
+        constants.GRAVITY * h_upper_door * (max(0.0, dt_u_val) / params.t_ext_k)
     )
-    m_dot_door_buoy = (
+    m_door = (
         0.5
         * constants.AIR_RHO_REF
         * params.w_door_open
         * h_upper_door
         * v_door_buoy
     )
-    m_dot_hood_flush = 0.25 * constants.AIR_RHO_REF * params.v_dot_hood_m3_s
-    g_upper_ext = (
-        ua_upper
-        + (m_dot_door_buoy + m_dot_hood_flush) * constants.AIR_CP
+    g_ov = (
+        constants.AIR_RHO_REF
+        * constants.AIR_CP
+        * 0.15
+        * params.l_room
+        * params.w_room
+        * math.sqrt(
+            constants.GRAVITY
+            * params.h_wall
+            * (max(0.0, dt_l_val - dt_u_val) / params.t_ext_k)
+        )
     )
+    return m_door, g_ov
 
-    m_dot_lower_ext = (
-        constants.AIR_RHO_REF * params.v_dot_hood_m3_s + m_dot_door_buoy
+  for _ in range(16):
+    m_dot_door_buoy, g_overturn = _exchange_rates(dt_upper, dt_lower)
+    dt_u_new, dt_l_new = _solve_zone_conductance_system(
+        ua_upper=ua_upper,
+        ua_lower=ua_lower,
+        m_dot_door_buoy=m_dot_door_buoy,
+        m_hood_upper=m_hood_upper,
+        m_cap_total=m_cap_total,
+        m_dot_spill=m_dot_spill,
+        g_overturn=g_overturn,
+        q_u_rhs=q_u_rhs,
+        q_l_rhs=q_l_rhs,
     )
-    g_lower_ext = ua_lower + m_dot_lower_ext * constants.AIR_CP
+    dt_upper = 0.5 * dt_upper + 0.5 * dt_u_new
+    dt_lower = 0.5 * dt_lower + 0.5 * dt_l_new
 
-    m_dot_recirc = max(0.0, m_dot_spill - m_dot_door_buoy)
-    g_recirc = m_dot_recirc * constants.AIR_CP
-
-    denom = (
-        g_upper_ext * g_lower_ext
-        + g_recirc * (g_upper_ext + g_lower_ext)
-    )
-    if denom > 1e-6:
-      dt_upper_new = (
-          q_upper_heating_w * (g_lower_ext + g_recirc)
-          + q_lower_heating_w * g_recirc
-      ) / denom
-      dt_lower_new = (
-          q_lower_heating_w * (g_upper_ext + g_recirc)
-          + q_upper_heating_w * g_recirc
-      ) / denom
-    else:
-      dt_upper_new = q_upper_heating_w / max(g_upper_ext, 1.0)
-      dt_lower_new = dt_upper_new
-
-    dt_upper = 0.5 * dt_upper + 0.5 * max(0.0, dt_upper_new)
-    dt_lower = 0.5 * dt_lower + 0.5 * max(0.0, min(dt_upper, dt_lower_new))
+  # Final exact 2x2 solve with frozen exchange conductances closes global energy
+  # to machine precision.
+  m_dot_door_buoy, g_overturn = _exchange_rates(dt_upper, dt_lower)
+  dt_upper, dt_lower = _solve_zone_conductance_system(
+      ua_upper=ua_upper,
+      ua_lower=ua_lower,
+      m_dot_door_buoy=m_dot_door_buoy,
+      m_hood_upper=m_hood_upper,
+      m_cap_total=m_cap_total,
+      m_dot_spill=m_dot_spill,
+      g_overturn=g_overturn,
+      q_u_rhs=q_u_rhs,
+      q_l_rhs=q_l_rhs,
+  )
 
   t_room_upper_k = params.t_ext_k + dt_upper
   t_room_lower_k = params.t_ext_k + dt_lower
+  q_hood_exhaust_w = (
+      eta_plume * q_plume_total_w
+      + eta_chimney * chimney.q_conv_total_w
+      + m_cap_total * constants.AIR_CP * dt_lower
+      + m_hood_upper * constants.AIR_CP * dt_upper
+  )
 
   return RoomSolution(
       q_plume_conv_w=q_plume_total_w,
@@ -302,4 +391,7 @@ def solve_plume_and_room(
       t_room_lower_k=t_room_lower_k,
       z_stratification_layer_m=z_layer,
       t_plume_at_hood_k=t_plume_at_hood_k,
+      v_dot_hood_eff_m3_s=v_dot_hood_eff,
+      m_dot_door_buoy_kg_s=m_dot_door_buoy,
+      q_hood_exhaust_w=q_hood_exhaust_w,
   )

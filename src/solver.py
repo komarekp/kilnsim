@@ -454,6 +454,16 @@ def solve_thermal_system(
         mesh=mesh,
         vf_sys=vf_sys,
     )
+    eb_surf = params_lib.STEFAN_BOLTZMANN * (t_safe ** 4)
+    eb_room = params_lib.STEFAN_BOLTZMANN * (t_amb_local ** 4)
+    q_rad_room_patch_w = np.where(
+        ref_mask,
+        mesh.areas
+        * params.eps_reflector_top
+        * vf_sys.f_room
+        * (eb_surf - eb_room),
+        mesh.areas * vf_sys.f_room * (radiosity - eb_room),
+    )
 
     # 2. Front-face natural convection
     h_front = compute_natural_convection_h(
@@ -522,17 +532,37 @@ def solve_thermal_system(
     t_back_k[gypsum_mask] = t_safe[gypsum_mask] + (
         q_cond_in[gypsum_mask] * (params.t_gypsum / params.k_gypsum)
     )
+    q_under_ref_conv_w = 0.0
     if np.any(ref_mask):
-      q_ref_down, du_ref_down, t_ref_back_k, _ = solve_under_reflector_column(
-          t_ref_front_k=t_ref_val,
-          t_room_lower_k=t_room_lower_k,
-          params=params,
+      q_ref_down, du_ref_down, t_ref_back_k, t_pad_center_k = (
+          solve_under_reflector_column(
+              t_ref_front_k=t_ref_val,
+              t_room_lower_k=t_room_lower_k,
+              params=params,
+          )
       )
       u_cond_diag[ref_mask] = du_ref_down
       q_cond_in[ref_mask] = -q_ref_down
       t_back_k[ref_mask] = t_ref_back_k
+      if (
+          params.r_reflector > 0.0
+          and params.g_floor_reflector > constants.GEOM_TOL_M
+      ):
+        q_under_ref_conv_w = (
+            float(np.sum(mesh.areas[ref_mask]))
+            * constants.H_CONV_UNDER_REFLECTOR_W_M2K
+            * (
+                (t_ref_back_k - t_room_lower_k)
+                + (t_pad_center_k - t_room_lower_k)
+            )
+        )
     q_cond_in[ssr_mask] = (
         constants.H_CONV_SSR_INTERNAL_W_M2K * (t_ssr_air_k - t_safe[ssr_mask])
+    )
+    q_ssr_louver_w = params.q_ssr_internal_w - (
+        float(np.sum(mesh.areas[ssr_mask] * q_cond_in[ssr_mask]))
+        if np.any(ssr_mask)
+        else 0.0
     )
 
     residual = q_rad_out + q_conv_out - q_cond_in
@@ -552,6 +582,9 @@ def solve_thermal_system(
     latest_state["chimney"] = chimney_sol
     latest_state["t_ssr_air_k"] = t_ssr_air_k
     latest_state["t_ssr_case_k"] = t_ssr_case_k
+    latest_state["q_rad_room_patch_w"] = q_rad_room_patch_w
+    latest_state["q_ssr_louver_w"] = q_ssr_louver_w
+    latest_state["q_under_ref_conv_w"] = q_under_ref_conv_w
 
     return residual, jac_diag
 
@@ -587,6 +620,9 @@ def solve_thermal_system(
         chimney=latest_state["chimney"],
         t_lower_prev_k=t_room_lower_k,
         params=params,
+        q_rad_room_patch_w=latest_state["q_rad_room_patch_w"],
+        q_ssr_louver_w=latest_state["q_ssr_louver_w"],
+        q_under_ref_conv_w=latest_state["q_under_ref_conv_w"],
     )
 
     dt_room_change = max(

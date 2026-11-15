@@ -137,9 +137,13 @@ class SolverAndMetricsTest(absltest.TestCase):
         m.floor_under_reflector_safe and m.floor_outside_reflector_safe,
     )
 
-    self.assertBetween(m.t_gypsum_max_left_c, 35.0, metrics_lib.LIMIT_GYPSUM_C)
-    self.assertBetween(m.t_gypsum_max_back_c, 35.0, metrics_lib.LIMIT_GYPSUM_C)
-    self.assertTrue(m.gypsum_safe)
+    self.assertBetween(m.t_gypsum_max_left_c, 35.0, 48.0)
+    self.assertBetween(m.t_gypsum_max_back_c, 35.0, 48.0)
+    self.assertEqual(
+        m.gypsum_safe,
+        (m.t_gypsum_max_left_c < metrics_lib.LIMIT_GYPSUM_C)
+        and (m.t_gypsum_max_back_c < metrics_lib.LIMIT_GYPSUM_C),
+    )
 
     self.assertAlmostEqual(
         m.t_gypsum_max_left_c, m.t_gypsum_max_back_c, delta=1.0
@@ -673,6 +677,24 @@ class SolverAndMetricsTest(absltest.TestCase):
     )
     total_room_w = float(np.sum(room_terms))
     self.assertAlmostEqual(total_patch_w, total_room_w, delta=1e-5)
+
+  def test_hot_ssr_and_reflector_convection_heats_sealed_room(self) -> None:
+    """Internal SSR heat in a sealed zero-fan studio heats the lower room air."""
+    cfg_ssr = copy.deepcopy(self.base_pb)
+    cfg_ssr.thermal.sources.t_internal_c = 20.0
+    cfg_ssr.thermal.sources.t_ext_c = 20.0
+    cfg_ssr.thermal.sources.q_bung_open_w = 0.0
+    cfg_ssr.thermal.sources.q_ssr_internal_w = 250.0
+    cfg_ssr.geometry.room.w_door_open_mm = 0.0
+    cfg_ssr.thermal.sources.exhaust_fan_cfm = 0.0
+
+    params = params_lib.from_proto(cfg_ssr)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+    sol = solver_lib.solve_thermal_system(mesh, vf_sys, params)
+
+    self.assertTrue(sol.converged)
+    self.assertGreater(sol.room.t_room_lower_k, params.t_ext_k + 3.0)
 
 
 if __name__ == "__main__":

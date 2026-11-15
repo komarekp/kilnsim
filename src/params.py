@@ -168,6 +168,35 @@ class SimParams:
   d_chimney_eff: float
   u_aac_wall: float
 
+  def _unmeshed_opaque_wall_perimeter(self) -> float:
+    """Returns unmeshed studio perimeter (m), excluding door and meshed corner."""
+    w_gyp_left = max(
+        self.dx_wall,
+        min(
+            self.l_room,
+            self.x_shield_left_end + constants.EXPOSED_GYPSUM_BAND_WIDTH_M,
+        )
+        - self.x_shield_left_end,
+    )
+    w_meshed_left = min(self.l_room, self.x_shield_left_end + w_gyp_left)
+    w_gyp_back = max(
+        self.dx_wall,
+        min(
+            self.w_room,
+            self.y_shield_back_end + constants.EXPOSED_GYPSUM_BAND_WIDTH_M,
+        )
+        - self.y_shield_back_end,
+    )
+    w_meshed_back = min(self.w_room, self.y_shield_back_end + w_gyp_back)
+    return max(
+        0.0,
+        2.0 * self.l_room
+        + 2.0 * self.w_room
+        - self.w_glass_door
+        - w_meshed_left
+        - w_meshed_back,
+    )
+
   def compute_ua_upper_zone(self, z_layer: float) -> float:
     """Computes parallel envelope thermal conductance (UA)_upper in W/K.
 
@@ -184,11 +213,7 @@ class SimParams:
     z_clamped = max(0.0, min(self.h_wall, z_layer))
     h_upper_wall = self.h_wall - z_clamped
     a_roof = self.l_room * self.w_room
-    p_opaque_walls = (
-        2.0 * self.l_room
-        + 2.0 * self.w_room
-        - self.w_glass_door
-    )
+    p_opaque_walls = self._unmeshed_opaque_wall_perimeter()
     a_wall_upper = max(0.0, p_opaque_walls * h_upper_wall)
     h_glass_upper = max(0.0, self.h_door - z_clamped)
     a_glass_upper = self.w_glass_door * h_glass_upper
@@ -204,7 +229,8 @@ class SimParams:
 
     Sums the parallel conductive paths out of the lower room zone through the
     lower portion of the AAC walls, the lower portion of the sliding glass door
-    below height z_layer, and the exposed room floor outside the kiln footprint.
+    below height z_layer, and the exposed room floor outside the kiln/reflector
+    footprint.
 
     Args:
       z_layer: Height of the two-zone stratification interface above z = 0 (m).
@@ -213,17 +239,14 @@ class SimParams:
       Total lower-zone envelope thermal conductance (UA)_lower in W/K.
     """
     z_clamped = max(0.0, min(self.h_wall, z_layer))
-    p_opaque_walls = (
-        2.0 * self.l_room
-        + 2.0 * self.w_room
-        - self.w_glass_door
-    )
+    p_opaque_walls = self._unmeshed_opaque_wall_perimeter()
     a_wall_lower = max(0.0, p_opaque_walls * z_clamped)
     h_glass_lower = max(0.0, min(self.h_door, z_clamped))
     a_glass_lower = self.w_glass_door * h_glass_lower
+    r_excl = max(self.r_kiln, self.r_reflector)
     a_floor = max(
         0.0,
-        self.l_room * self.w_room - math.pi * (self.r_kiln**2),
+        self.l_room * self.w_room - math.pi * (r_excl**2),
     )
     r_subfloor = (
         self.t_screed / max(self.k_screed, 1e-4)

@@ -161,6 +161,110 @@ class PlumeRoomTest(absltest.TestCase):
         delta=1e-3,
     )
 
+  def test_closed_door_throttles_effective_hood_exhaust_flow(self) -> None:
+    """Closing the room door starves makeup air and throttles hood exhaust flow."""
+    cfg_open = copy.deepcopy(self.base_pb)
+    cfg_open.geometry.room.w_door_open_mm = 900.0
+    cfg_open.thermal.sources.exhaust_fan_cfm = 400.0
+    p_o, m_o, tf_o, qc_o, ch_o = self._make_plume_inputs(
+        cfg_open, q_kiln_flux=400.0
+    )
+    sol_open = plume_room_lib.solve_plume_and_room(
+        mesh=m_o,
+        t_front_k=tf_o,
+        q_conv_front_w_m2=qc_o,
+        chimney=ch_o,
+        t_lower_prev_k=p_o.t_ext_k,
+        params=p_o,
+    )
+
+    cfg_closed = copy.deepcopy(self.base_pb)
+    cfg_closed.geometry.room.w_door_open_mm = 0.0
+    cfg_closed.thermal.sources.exhaust_fan_cfm = 400.0
+    p_c, m_c, tf_c, qc_c, ch_c = self._make_plume_inputs(
+        cfg_closed, q_kiln_flux=400.0
+    )
+    sol_closed = plume_room_lib.solve_plume_and_room(
+        mesh=m_c,
+        t_front_k=tf_c,
+        q_conv_front_w_m2=qc_c,
+        chimney=ch_c,
+        t_lower_prev_k=p_c.t_ext_k,
+        params=p_c,
+    )
+
+    self.assertGreater(sol_open.v_dot_hood_eff_m3_s, 0.95 * p_o.v_dot_hood_m3_s)
+    self.assertGreater(sol_closed.v_dot_hood_eff_m3_s, 0.0)
+    self.assertLess(sol_closed.v_dot_hood_eff_m3_s, 0.6 * p_c.v_dot_hood_m3_s)
+
+  def test_two_zone_steady_energy_balance_closes_globally(self) -> None:
+    """Room energy inputs (convection, radiation, louvers) equal envelope + airflow losses."""
+    from src import constants
+
+    for w_door_mm, fan_cfm in [(800.0, 250.0), (0.0, 400.0)]:
+      cfg = copy.deepcopy(self.base_pb)
+      cfg.geometry.room.w_door_open_mm = w_door_mm
+      cfg.thermal.sources.exhaust_fan_cfm = fan_cfm
+      p, m, tf, qc, ch = self._make_plume_inputs(cfg, q_kiln_flux=250.0)
+
+      stypes = m.surface_types
+      kiln_mask = (stypes == int(mesh_lib.SurfaceType.KILN_SIDE)) | (
+          stypes == int(mesh_lib.SurfaceType.KILN_LID)
+      )
+      shield_mask = (stypes == int(mesh_lib.SurfaceType.SHIELD_LEFT)) | (
+          stypes == int(mesh_lib.SurfaceType.SHIELD_BACK)
+      )
+      gyp_mask = (stypes == int(mesh_lib.SurfaceType.GYPSUM_LEFT)) | (
+          stypes == int(mesh_lib.SurfaceType.GYPSUM_BACK)
+      )
+      qc[shield_mask] = 25.0
+      qc[gyp_mask] = -12.0
+
+      q_rad_room_patch_w = np.zeros(m.num_patches, dtype=np.float64)
+      q_rad_room_patch_w[stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)] = (
+          60.0
+      )
+      q_rad_room_patch_w[gyp_mask] = -2.0
+      q_ssr_louver_w = 180.0
+      q_under_ref_conv_w = 45.0
+
+      sol = plume_room_lib.solve_plume_and_room(
+          mesh=m,
+          t_front_k=tf,
+          q_conv_front_w_m2=qc,
+          chimney=ch,
+          t_lower_prev_k=p.t_ext_k,
+          params=p,
+          q_rad_room_patch_w=q_rad_room_patch_w,
+          q_ssr_louver_w=q_ssr_louver_w,
+          q_under_ref_conv_w=q_under_ref_conv_w,
+      )
+
+      non_plume_conv_w = np.where(
+          kiln_mask,
+          np.minimum(0.0, qc) * m.areas,
+          qc * m.areas,
+      )
+      q_in = (
+          sol.q_plume_conv_w
+          + ch.q_conv_total_w
+          + float(np.sum(non_plume_conv_w))
+          + float(np.sum(q_rad_room_patch_w))
+          + q_ssr_louver_w
+          + q_under_ref_conv_w
+      )
+      ua_upper = p.compute_ua_upper_zone(sol.z_stratification_layer_m)
+      ua_lower = p.compute_ua_lower_zone(sol.z_stratification_layer_m)
+      q_out = (
+          ua_upper * (sol.t_room_upper_k - p.t_ext_k)
+          + ua_lower * (sol.t_room_lower_k - p.t_ext_k)
+          + sol.m_dot_door_buoy_kg_s
+          * constants.AIR_CP
+          * (sol.t_room_upper_k - p.t_ext_k)
+          + sol.q_hood_exhaust_w
+      )
+      self.assertAlmostEqual(q_in, q_out, delta=1e-4)
+
 
 if __name__ == "__main__":
   absltest.main()
