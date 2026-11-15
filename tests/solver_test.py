@@ -1,6 +1,7 @@
 """End-to-end physics and equilibrium unit tests for kiln_sim.solver and metrics."""
 
 import copy
+import dataclasses
 import os
 import pathlib
 import tempfile
@@ -695,6 +696,104 @@ class SolverAndMetricsTest(absltest.TestCase):
 
     self.assertTrue(sol.converged)
     self.assertGreater(sol.room.t_room_lower_k, params.t_ext_k + 3.0)
+
+  def test_radiatively_heated_ceiling_sensor_is_stably_stratified_vs_floor_sensor(
+      self,
+  ) -> None:
+    """A radiatively heated downward-facing ceiling sensor has lower h_c than a floor sensor."""
+    vf_vec = np.array([0.25], dtype=np.float64)
+    rad = np.array(
+        [params_lib.STEFAN_BOLTZMANN * (650.0 ** 4)], dtype=np.float64
+    )
+    t_ceil_k = metrics_lib._solve_ceiling_sensor_temp_k(
+        vf_vec, rad, 0.90, 0.20, 300.0, 293.15
+    )
+    t_floor_k = metrics_lib._solve_floor_sensor_temp_k(
+        vf_vec, rad, 0.90, 0.20, 300.0, 293.15
+    )
+    self.assertGreater(t_ceil_k, t_floor_k + 3.0)
+
+  def test_uncaptured_plume_spill_heats_ceiling_hood_rim_sensors(
+      self,
+  ) -> None:
+    """Uncaptured warm plume gas spilling past the hood heats the ceiling rim."""
+    params = params_lib.from_proto(self.base_pb)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+    sol = solver_lib.solve_thermal_system(mesh, vf_sys, params)
+
+    t_plume_hot = sol.room.t_room_upper_k + 60.0
+    sol_captured = dataclasses.replace(
+        sol,
+        room=dataclasses.replace(
+            sol.room,
+            plume_capture_fraction=1.0,
+            t_plume_at_hood_k=t_plume_hot,
+        ),
+    )
+    sol_spill = dataclasses.replace(
+        sol,
+        room=dataclasses.replace(
+            sol.room,
+            plume_capture_fraction=0.2,
+            t_plume_at_hood_k=t_plume_hot,
+        ),
+    )
+    m_captured = metrics_lib.compute_safety_metrics(
+        mesh=mesh, vf_sys=vf_sys, solution=sol_captured, params=params
+    )
+    m_spill = metrics_lib.compute_safety_metrics(
+        mesh=mesh, vf_sys=vf_sys, solution=sol_spill, params=params
+    )
+    self.assertGreater(m_spill.t_ceiling_max_c, m_captured.t_ceiling_max_c + 2.0)
+
+  def test_exposed_corner_aac_gap_raises_t_aac_max_c(self) -> None:
+    """Exposing bare corner AAC via large g_ceil or g_floor raises peak AAC temp."""
+    cfg_base = copy.deepcopy(self.base_pb)
+    cfg_base.geometry.kiln.s_kiln_left_mm = 150.0
+    cfg_base.geometry.kiln.s_kiln_back_mm = 150.0
+    cfg_base.geometry.shield.g_floor_mm = 50.0
+    cfg_base.geometry.shield.g_ceil_mm = 50.0
+    p_base = params_lib.from_proto(cfg_base)
+    m_base = mesh_lib.build_mesh(p_base)
+    vf_base = vf_lib.compute_view_factors(m_base, p_base)
+    sol_base = solver_lib.solve_thermal_system(m_base, vf_base, p_base)
+    met_base = metrics_lib.compute_safety_metrics(
+        mesh=m_base, vf_sys=vf_base, solution=sol_base, params=p_base
+    )
+
+    cfg_ceil_gap = copy.deepcopy(cfg_base)
+    cfg_ceil_gap.geometry.shield.g_ceil_mm = 1850.0
+    p_ceil_gap = params_lib.from_proto(cfg_ceil_gap)
+    m_ceil_gap = mesh_lib.build_mesh(p_ceil_gap)
+    vf_ceil_gap = vf_lib.compute_view_factors(m_ceil_gap, p_ceil_gap)
+    sol_ceil_gap = solver_lib.solve_thermal_system(
+        m_ceil_gap, vf_ceil_gap, p_ceil_gap
+    )
+    met_ceil_gap = metrics_lib.compute_safety_metrics(
+        mesh=m_ceil_gap,
+        vf_sys=vf_ceil_gap,
+        solution=sol_ceil_gap,
+        params=p_ceil_gap,
+    )
+
+    cfg_floor_gap = copy.deepcopy(cfg_base)
+    cfg_floor_gap.geometry.shield.g_floor_mm = 800.0
+    p_floor_gap = params_lib.from_proto(cfg_floor_gap)
+    m_floor_gap = mesh_lib.build_mesh(p_floor_gap)
+    vf_floor_gap = vf_lib.compute_view_factors(m_floor_gap, p_floor_gap)
+    sol_floor_gap = solver_lib.solve_thermal_system(
+        m_floor_gap, vf_floor_gap, p_floor_gap
+    )
+    met_floor_gap = metrics_lib.compute_safety_metrics(
+        mesh=m_floor_gap,
+        vf_sys=vf_floor_gap,
+        solution=sol_floor_gap,
+        params=p_floor_gap,
+    )
+
+    self.assertGreater(met_ceil_gap.t_aac_max_c, met_base.t_aac_max_c + 5.0)
+    self.assertGreater(met_floor_gap.t_aac_max_c, met_base.t_aac_max_c + 5.0)
 
 
 if __name__ == "__main__":

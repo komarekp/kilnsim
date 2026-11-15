@@ -326,6 +326,65 @@ def _is_segment_blocked_by_hood(
   return valid_z & (q_min < 0.0)
 
 
+def _is_segment_blocked_by_shields(
+    p1: np.ndarray,
+    p2: np.ndarray,
+    params: params_lib.SimParams,
+) -> np.ndarray:
+  """Returns boolean mask of segments p1 -> p2 occluded by corner shields."""
+  z_bot = params.g_floor
+  z_top = params.h_wall - params.g_ceil
+  if z_top <= z_bot + 1e-6:
+    return np.zeros(p2.shape[0], dtype=bool)
+
+  p1_arr = np.broadcast_to(p1, p2.shape)
+  blocked = np.zeros(p2.shape[0], dtype=bool)
+
+  # Left corner shield plane at y = y_shield_front_left_wall
+  dy = p2[:, 1] - p1_arr[:, 1]
+  valid_y = np.abs(dy) > 1e-9
+  t_y = np.where(
+      valid_y,
+      (params.y_shield_front_left_wall - p1_arr[:, 1])
+      / np.where(valid_y, dy, 1.0),
+      -1.0,
+  )
+  in_y = valid_y & (t_y > 1e-5) & (t_y < 1.0 - 1e-5)
+  if np.any(in_y):
+    x_hit = p1_arr[:, 0] + t_y * (p2[:, 0] - p1_arr[:, 0])
+    z_hit = p1_arr[:, 2] + t_y * (p2[:, 2] - p1_arr[:, 2])
+    blocked |= (
+        in_y
+        & (x_hit >= params.x_shield_left_start - 1e-6)
+        & (x_hit <= params.x_shield_left_end + 1e-6)
+        & (z_hit >= z_bot - 1e-6)
+        & (z_hit <= z_top + 1e-6)
+    )
+
+  # Back corner shield plane at x = x_shield_front_back_wall
+  dx = p2[:, 0] - p1_arr[:, 0]
+  valid_x = np.abs(dx) > 1e-9
+  t_x = np.where(
+      valid_x,
+      (params.x_shield_front_back_wall - p1_arr[:, 0])
+      / np.where(valid_x, dx, 1.0),
+      -1.0,
+  )
+  in_x = valid_x & (t_x > 1e-5) & (t_x < 1.0 - 1e-5)
+  if np.any(in_x):
+    y_hit = p1_arr[:, 1] + t_x * (p2[:, 1] - p1_arr[:, 1])
+    z_hit = p1_arr[:, 2] + t_x * (p2[:, 2] - p1_arr[:, 2])
+    blocked |= (
+        in_x
+        & (y_hit >= params.y_shield_back_start - 1e-6)
+        & (y_hit <= params.y_shield_back_end + 1e-6)
+        & (z_hit >= z_bot - 1e-6)
+        & (z_hit <= z_top + 1e-6)
+    )
+
+  return blocked
+
+
 def _is_segment_blocked_by_solids(
     p1: np.ndarray,
     p2: np.ndarray,
@@ -333,6 +392,7 @@ def _is_segment_blocked_by_solids(
     check_kiln_cyl: bool = True,
     check_hood: bool = True,
     check_reflector_disk: bool = False,
+    check_shields: bool = False,
 ) -> np.ndarray:
   """Returns boolean mask of segments blocked by enabled solid bodies."""
   blocked = np.zeros(p2.shape[0], dtype=bool)
@@ -346,6 +406,8 @@ def _is_segment_blocked_by_solids(
     blocked |= _is_segment_blocked_by_reflector_disk(
         p1=p1, p2=p2, params=params
     )
+  if check_shields:
+    blocked |= _is_segment_blocked_by_shields(p1=p1, p2=p2, params=params)
   return blocked
 
 
@@ -396,6 +458,7 @@ def _compute_point_to_disk_vf(
     check_kiln_cyl: bool = False,
     check_reflector_disk: bool = False,
     check_hood: bool = True,
+    check_shields: bool = False,
 ) -> float:
   """Integrates dF_{pt -> disk} over polar sub-elements with ray occlusion."""
   if disk_sub_coords.shape[0] == 0 or d_area_sub <= 0.0:
@@ -410,7 +473,7 @@ def _compute_point_to_disk_vf(
   if not np.any(valid):
     return 0.0
 
-  if check_kiln_cyl or check_reflector_disk or check_hood:
+  if check_kiln_cyl or check_reflector_disk or check_hood or check_shields:
     valid_idx = np.flatnonzero(valid)
     p1_b = np.broadcast_to(pt_coord, disk_sub_coords[valid_idx].shape)
     blocked = _is_segment_blocked_by_solids(
@@ -420,6 +483,7 @@ def _compute_point_to_disk_vf(
         check_kiln_cyl=check_kiln_cyl,
         check_hood=check_hood,
         check_reflector_disk=check_reflector_disk,
+        check_shields=check_shields,
     )
     valid[valid_idx[blocked]] = False
     if not np.any(valid):
@@ -522,6 +586,7 @@ def _compute_point_to_patches_vf(
     exclude_mask: np.ndarray,
     params: params_lib.SimParams | None = None,
     check_reflector_disk: bool = True,
+    check_shields: bool = False,
 ) -> np.ndarray:
   """Computes differential view factors dF_{pt -> n} from a point to patches."""
   r_vec = patch_centroids - pt_coord[None, :]
@@ -541,6 +606,7 @@ def _compute_point_to_patches_vf(
         check_kiln_cyl=True,
         check_hood=True,
         check_reflector_disk=check_reflector_disk,
+        check_shields=check_shields,
     )
     valid[valid_idx[blocked]] = False
 
@@ -1143,8 +1209,9 @@ def compute_view_factors(
       vf_vec *= constants.MAX_SENSOR_VF_SUM / s_sum
     sensor_vf[name] = vf_vec
 
-  # 7. Ceiling downward-facing point-to-patch view factor vectors at z = h_wall
+  # 7. Ceiling downward-facing and bare AAC gap point-to-patch view factor vectors
   sensor_vf.update(compute_ceiling_sensor_vfs(mesh=mesh, params=params))
+  sensor_vf.update(compute_bare_aac_sensor_vfs(mesh=mesh, params=params))
 
   return ViewFactorSystem(
       f_eff=f_eff,
@@ -1153,11 +1220,13 @@ def compute_view_factors(
   )
 
 
-def compute_ceiling_sensor_vfs(
+def _compute_upper_point_sensor_vfs(
     mesh: mesh_lib.SurfaceMesh,
     params: params_lib.SimParams,
+    point_specs: dict[str, tuple[tuple[float, float, float], np.ndarray]],
+    check_shields: bool,
 ) -> dict[str, np.ndarray]:
-  """Computes the downward-facing ceiling sensor view factor vectors at z = h_wall."""
+  """Computes point-to-patch VFs with finite disks and specular reflector bounce."""
   c = mesh.centroids
   n_vec = mesh.normals
   areas = mesh.areas
@@ -1165,40 +1234,12 @@ def compute_ceiling_sensor_vfs(
   bot_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
   lid_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_LID))
   ref_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP))
+  kiln_side_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_SIDE))
 
-  diag_inv = 1.0 / math.sqrt(2.0)
-  r_ceil_sensor = params.r_hood_inlet + CEILING_SENSOR_RIM_OFFSET_M
-  ceiling_points = {
-      "ceiling_hood_rim_corner": (
-          max(
-              CEILING_SENSOR_WALL_OFFSET_M,
-              params.x_hood - r_ceil_sensor * diag_inv,
-          ),
-          max(
-              CEILING_SENSOR_WALL_OFFSET_M,
-              params.y_hood - r_ceil_sensor * diag_inv,
-          ),
-          params.h_wall,
-      ),
-      "ceiling_hood_rim_room": (
-          params.x_hood + r_ceil_sensor * diag_inv,
-          params.y_hood + r_ceil_sensor * diag_inv,
-          params.h_wall,
-      ),
-      "ceiling_chimney_corner": (
-          params.x_kiln_center,
-          params.y_shield_front_left_wall + CEILING_SENSOR_WALL_OFFSET_M,
-          params.h_wall,
-      ),
-  }
-  pt_n_ceil = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-  exclude_ceil = (
+  exclude_disks = (
       (stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
       | (stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP))
       | (stypes == int(mesh_lib.SurfaceType.KILN_LID))
-  )
-  kiln_side_ids_ceil = np.flatnonzero(
-      stypes == int(mesh_lib.SurfaceType.KILN_SIDE)
   )
   lid_sub_coords, _, d_area_lid = _sample_disk_quadrature(
       x_center=params.x_kiln_center,
@@ -1222,169 +1263,311 @@ def compute_ceiling_sensor_vfs(
       r_outer=params.r_kiln,
   )
 
-  ceil_sensor_vf: dict[str, np.ndarray] = {}
-  for name, coord in ceiling_points.items():
+  sensor_vf_map: dict[str, np.ndarray] = {}
+  for name, (coord, pt_n) in point_specs.items():
     pt_c = np.array(coord, dtype=np.float64)
     vf_vec = _compute_point_to_patches_vf(
         pt_coord=pt_c,
-        pt_normal=pt_n_ceil,
+        pt_normal=pt_n,
         patch_centroids=c,
         patch_normals=n_vec,
         patch_areas=areas,
-        exclude_mask=exclude_ceil,
+        exclude_mask=exclude_disks,
         params=params,
         check_reflector_disk=True,
+        check_shields=check_shields,
     )
     if lid_ids.size == 1 and params.r_kiln > 0.0:
       vf_vec[int(lid_ids[0])] = _compute_point_to_disk_vf(
           pt_coord=pt_c,
-          pt_normal=pt_n_ceil,
+          pt_normal=pt_n,
           disk_sub_coords=lid_sub_coords,
           d_area_sub=d_area_lid,
           disk_nz=1.0,
           params=params,
+          check_reflector_disk=(pt_c[2] < params.z_reflector_top),
+          check_shields=check_shields,
       )
-    if ref_ids.size == 1 and params.r_reflector > params.r_kiln + 1e-4:
-      r_id = int(ref_ids[0])
-      vf_ceil_ref_direct = _compute_point_to_disk_vf(
+    if bot_ids.size == 1 and pt_c[2] < params.z_drum_bot - 1e-6:
+      b_id = int(bot_ids[0])
+      bot_sub_coords, _, d_area_bot = _sample_disk_quadrature(
+          x_center=params.x_kiln_center,
+          y_center=params.y_kiln_center,
+          z_plane=params.z_drum_bot,
+          r_inner=0.0,
+          r_outer=params.r_kiln,
+      )
+      vf_vec[b_id] = _compute_point_to_disk_vf(
           pt_coord=pt_c,
-          pt_normal=pt_n_ceil,
+          pt_normal=pt_n,
+          disk_sub_coords=bot_sub_coords,
+          d_area_sub=d_area_bot,
+          disk_nz=-1.0,
+          params=params,
+          check_reflector_disk=True,
+          check_shields=check_shields,
+      )
+
+    if (
+        ref_ids.size == 1
+        and params.r_reflector > params.r_kiln + 1e-4
+        and pt_c[2] > params.z_reflector_top + 1e-4
+    ):
+      r_id = int(ref_ids[0])
+      vf_ref_direct = _compute_point_to_disk_vf(
+          pt_coord=pt_c,
+          pt_normal=pt_n,
           disk_sub_coords=ann_coords,
           d_area_sub=d_area_ann,
           disk_nz=1.0,
           params=params,
           check_kiln_cyl=True,
+          check_shields=check_shields,
       )
 
       if params.rho_reflector_top > 0.0:
-        # (i) Specular bounce from KILN_SIDE virtual images to ceiling sensor
-        if kiln_side_ids_ceil.size > 0:
-          c_ks = c[kiln_side_ids_ceil]
-          n_ks = n_vec[kiln_side_ids_ceil]
-          a_ks = areas[kiln_side_ids_ceil]
+        # (i) Specular bounce from KILN_SIDE virtual images
+        if kiln_side_ids.size > 0:
+          c_ks = c[kiln_side_ids]
+          n_ks = n_vec[kiln_side_ids]
+          a_ks = areas[kiln_side_ids]
           c_ks_img = c_ks.copy()
           c_ks_img[:, 2] = 2.0 * params.z_reflector_top - c_ks[:, 2]
           n_ks_img = n_ks.copy()
           n_ks_img[:, 2] = -n_ks[:, 2]
 
-          r_c_to_ks = c_ks_img - pt_c[None, :]
-          d_sq_cks = np.sum(r_c_to_ks * r_c_to_ks, axis=1)
-          d_cks = np.sqrt(np.maximum(d_sq_cks, 1e-12))
-          cos_c_ks = -r_c_to_ks[:, 2] / d_cks
-          cos_ks_c = -np.sum(r_c_to_ks * n_ks_img, axis=1) / d_cks
+          r_pt_to_ks = c_ks_img - pt_c[None, :]
+          d_sq_ks = np.sum(r_pt_to_ks * r_pt_to_ks, axis=1)
+          d_ks = np.sqrt(np.maximum(d_sq_ks, 1e-12))
+          cos_pt_ks = np.sum(r_pt_to_ks * pt_n[None, :], axis=1) / d_ks
+          cos_ks_pt = -np.sum(r_pt_to_ks * n_ks_img, axis=1) / d_ks
 
-          dz_cks = pt_c[2] - c_ks_img[:, 2]
-          valid_cks = (c_ks[:, 2] > params.z_reflector_top + 1e-4) & (
-              dz_cks > 1e-6
+          dz_ks = pt_c[2] - c_ks_img[:, 2]
+          valid_ks = (c_ks[:, 2] > params.z_reflector_top + 1e-4) & (
+              dz_ks > 1e-6
           )
-          t_cks = np.where(
-              valid_cks,
-              (pt_c[2] - params.z_reflector_top) / np.maximum(dz_cks, 1e-6),
+          t_ks = np.where(
+              valid_ks,
+              (pt_c[2] - params.z_reflector_top) / np.maximum(dz_ks, 1e-6),
               0.0,
           )
-          x_hit_cks = pt_c[0] + t_cks * (c_ks_img[:, 0] - pt_c[0])
-          y_hit_cks = pt_c[1] + t_cks * (c_ks_img[:, 1] - pt_c[1])
-          r_hit_cks = np.hypot(
-              x_hit_cks - params.x_kiln_center,
-              y_hit_cks - params.y_kiln_center,
+          x_hit_ks = pt_c[0] + t_ks * (c_ks_img[:, 0] - pt_c[0])
+          y_hit_ks = pt_c[1] + t_ks * (c_ks_img[:, 1] - pt_c[1])
+          r_hit_ks = np.hypot(
+              x_hit_ks - params.x_kiln_center,
+              y_hit_ks - params.y_kiln_center,
           )
-          hit_cks = (
-              valid_cks
-              & (cos_c_ks > 1e-6)
-              & (cos_ks_c > 1e-6)
-              & (r_hit_cks >= params.r_kiln - 1e-4)
-              & (r_hit_cks <= params.r_reflector + 1e-4)
+          hit_ks = (
+              valid_ks
+              & (t_ks > 1e-5)
+              & (t_ks < 1.0 - 1e-5)
+              & (cos_pt_ks > 1e-6)
+              & (cos_ks_pt > 1e-6)
+              & (r_hit_ks >= params.r_kiln - 1e-4)
+              & (r_hit_ks <= params.r_reflector + 1e-4)
           )
-          if np.any(hit_cks):
-            hit_cks_idx = np.flatnonzero(hit_cks)
-            p1_cks = np.column_stack([
-                x_hit_cks[hit_cks_idx],
-                y_hit_cks[hit_cks_idx],
+          if np.any(hit_ks):
+            hit_ks_idx = np.flatnonzero(hit_ks)
+            p1_ks = np.column_stack([
+                x_hit_ks[hit_ks_idx],
+                y_hit_ks[hit_ks_idx],
                 np.full(
-                    hit_cks_idx.size, params.z_reflector_top, dtype=np.float64
+                    hit_ks_idx.size, params.z_reflector_top, dtype=np.float64
                 ),
             ])
-            blocked_cks = _is_segment_blocked_by_solids(
-                p1=p1_cks,
-                p2=np.broadcast_to(pt_c, p1_cks.shape),
+            blocked_ks = _is_segment_blocked_by_solids(
+                p1=p1_ks,
+                p2=np.broadcast_to(pt_c, p1_ks.shape),
                 params=params,
                 check_kiln_cyl=True,
                 check_hood=True,
                 check_reflector_disk=False,
+                check_shields=check_shields,
             )
-            hit_cks[hit_cks_idx[blocked_cks]] = False
-            if np.any(hit_cks):
-              vf_c_ks = np.zeros(kiln_side_ids_ceil.size, dtype=np.float64)
-              vf_c_ks[hit_cks] = (
-                  cos_c_ks[hit_cks]
-                  * cos_ks_c[hit_cks]
-                  * a_ks[hit_cks]
-                  / (math.pi * d_sq_cks[hit_cks] + 0.5 * a_ks[hit_cks])
+            hit_ks[hit_ks_idx[blocked_ks]] = False
+            if np.any(hit_ks):
+              vf_pt_ks = np.zeros(kiln_side_ids.size, dtype=np.float64)
+              vf_pt_ks[hit_ks] = (
+                  cos_pt_ks[hit_ks]
+                  * cos_ks_pt[hit_ks]
+                  * a_ks[hit_ks]
+                  / (math.pi * d_sq_ks[hit_ks] + 0.5 * a_ks[hit_ks])
               )
-              mirror_ks_contrib = params.rho_reflector_top * vf_c_ks
-              vf_vec[kiln_side_ids_ceil] += mirror_ks_contrib
+              vf_vec[kiln_side_ids] += params.rho_reflector_top * vf_pt_ks
 
-        # (ii) Specular bounce from finite KILN_BOTTOM virtual image disk to ceiling
+        # (ii) Specular bounce from finite KILN_BOTTOM virtual image disk
         if bot_ids.size == 1 and img_coords_b.shape[0] > 0:
           b_id = int(bot_ids[0])
-          r_c_to_b = img_coords_b - pt_c[None, :]
-          d_sq_cb = np.sum(r_c_to_b * r_c_to_b, axis=1)
-          d_cb = np.sqrt(np.maximum(d_sq_cb, 1e-12))
-          cos_c_b = -r_c_to_b[:, 2] / d_cb
-          cos_img_cb = -r_c_to_b[:, 2] / d_cb
-          dz_cb = pt_c[2] - params.z_mirror
-          if dz_cb > 1e-6:
-            t_cb = (pt_c[2] - params.z_reflector_top) / dz_cb
-            x_hit_cb = pt_c[0] + t_cb * (img_coords_b[:, 0] - pt_c[0])
-            y_hit_cb = pt_c[1] + t_cb * (img_coords_b[:, 1] - pt_c[1])
-            r_hit_cb = np.hypot(
-                x_hit_cb - params.x_kiln_center,
-                y_hit_cb - params.y_kiln_center,
+          r_pt_to_b = img_coords_b - pt_c[None, :]
+          d_sq_b = np.sum(r_pt_to_b * r_pt_to_b, axis=1)
+          d_b = np.sqrt(np.maximum(d_sq_b, 1e-12))
+          cos_pt_b = np.sum(r_pt_to_b * pt_n[None, :], axis=1) / d_b
+          cos_img_b = -r_pt_to_b[:, 2] / d_b
+          dz_b = pt_c[2] - params.z_mirror
+          if dz_b > 1e-6:
+            t_b = (pt_c[2] - params.z_reflector_top) / dz_b
+            x_hit_b = pt_c[0] + t_b * (img_coords_b[:, 0] - pt_c[0])
+            y_hit_b = pt_c[1] + t_b * (img_coords_b[:, 1] - pt_c[1])
+            r_hit_b = np.hypot(
+                x_hit_b - params.x_kiln_center,
+                y_hit_b - params.y_kiln_center,
             )
-            hit_cb = (
-                (cos_c_b > 1e-6)
-                & (cos_img_cb > 1e-6)
-                & (r_hit_cb >= params.r_kiln - 1e-4)
-                & (r_hit_cb <= params.r_reflector + 1e-4)
+            hit_b = (
+                (t_b > 1e-5)
+                & (t_b < 1.0 - 1e-5)
+                & (cos_pt_b > 1e-6)
+                & (cos_img_b > 1e-6)
+                & (r_hit_b >= params.r_kiln - 1e-4)
+                & (r_hit_b <= params.r_reflector + 1e-4)
             )
-            if np.any(hit_cb):
-              hit_cb_idx = np.flatnonzero(hit_cb)
-              p1_cb = np.column_stack([
-                  x_hit_cb[hit_cb_idx],
-                  y_hit_cb[hit_cb_idx],
+            if np.any(hit_b):
+              hit_b_idx = np.flatnonzero(hit_b)
+              p1_b = np.column_stack([
+                  x_hit_b[hit_b_idx],
+                  y_hit_b[hit_b_idx],
                   np.full(
-                      hit_cb_idx.size, params.z_reflector_top, dtype=np.float64
+                      hit_b_idx.size, params.z_reflector_top, dtype=np.float64
                   ),
               ])
-              blocked_cb = _is_segment_blocked_by_solids(
-                  p1=p1_cb,
-                  p2=np.broadcast_to(pt_c, p1_cb.shape),
+              blocked_b = _is_segment_blocked_by_solids(
+                  p1=p1_b,
+                  p2=np.broadcast_to(pt_c, p1_b.shape),
                   params=params,
                   check_kiln_cyl=True,
                   check_hood=True,
                   check_reflector_disk=False,
+                  check_shields=check_shields,
               )
-              hit_cb[hit_cb_idx[blocked_cb]] = False
-              if np.any(hit_cb):
-                vf_c_b = float(
+              hit_b[hit_b_idx[blocked_b]] = False
+              if np.any(hit_b):
+                vf_pt_b = float(
                     np.sum(
-                        cos_c_b[hit_cb]
-                        * cos_img_cb[hit_cb]
+                        cos_pt_b[hit_b]
+                        * cos_img_b[hit_b]
                         * d_area_b
-                        / (math.pi * d_sq_cb[hit_cb] + 0.5 * d_area_b)
+                        / (math.pi * d_sq_b[hit_b] + 0.5 * d_area_b)
                     )
                 )
-                mirror_b_contrib = params.rho_reflector_top * vf_c_b
-                vf_vec[b_id] += mirror_b_contrib
+                vf_vec[b_id] += params.rho_reflector_top * vf_pt_b
 
-      vf_vec[r_id] = params.eps_reflector_top * vf_ceil_ref_direct
+      vf_vec[r_id] = params.eps_reflector_top * vf_ref_direct
 
     s_sum = float(np.sum(vf_vec))
     if s_sum > constants.MAX_SENSOR_VF_SUM:
       vf_vec *= constants.MAX_SENSOR_VF_SUM / s_sum
-    ceil_sensor_vf[name] = vf_vec
+    sensor_vf_map[name] = vf_vec
 
-  return ceil_sensor_vf
+  return sensor_vf_map
+
+
+def compute_ceiling_sensor_vfs(
+    mesh: mesh_lib.SurfaceMesh,
+    params: params_lib.SimParams,
+) -> dict[str, np.ndarray]:
+  """Computes the downward-facing ceiling sensor view factor vectors at z = h_wall."""
+  diag_inv = 1.0 / math.sqrt(2.0)
+  r_ceil_sensor = params.r_hood_inlet + CEILING_SENSOR_RIM_OFFSET_M
+  pt_n_ceil = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+  point_specs = {
+      "ceiling_hood_rim_corner": (
+          (
+              max(
+                  CEILING_SENSOR_WALL_OFFSET_M,
+                  params.x_hood - r_ceil_sensor * diag_inv,
+              ),
+              max(
+                  CEILING_SENSOR_WALL_OFFSET_M,
+                  params.y_hood - r_ceil_sensor * diag_inv,
+              ),
+              params.h_wall,
+          ),
+          pt_n_ceil,
+      ),
+      "ceiling_hood_rim_room": (
+          (
+              params.x_hood + r_ceil_sensor * diag_inv,
+              params.y_hood + r_ceil_sensor * diag_inv,
+              params.h_wall,
+          ),
+          pt_n_ceil,
+      ),
+      "ceiling_chimney_corner": (
+          (
+              params.x_kiln_center,
+              params.y_shield_front_left_wall + CEILING_SENSOR_WALL_OFFSET_M,
+              params.h_wall,
+          ),
+          pt_n_ceil,
+      ),
+  }
+  return _compute_upper_point_sensor_vfs(
+      mesh=mesh,
+      params=params,
+      point_specs=point_specs,
+      check_shields=False,
+  )
+
+
+def bare_aac_sensor_points(
+    params: params_lib.SimParams,
+) -> dict[str, tuple[tuple[float, float, float], np.ndarray]]:
+  """Returns coordinates and inward normals for exposed bare-AAC gap strips."""
+  point_specs: dict[str, tuple[tuple[float, float, float], np.ndarray]] = {}
+  n_left = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+  n_back = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+  x_left = min(
+      params.x_kiln_center, max(0.05, params.x_shield_left_end - 0.05)
+  )
+  y_back = min(
+      params.y_kiln_center, max(0.05, params.y_shield_back_end - 0.05)
+  )
+
+  if params.g_floor > constants.GEOM_TOL_M:
+    n_floor = max(1, int(math.ceil(params.g_floor / params.dz_wall)))
+    dz_f = params.g_floor / n_floor
+    for k in range(n_floor):
+      z_f = (k + 0.5) * dz_f
+      point_specs[f"aac_gap_floor_left_{k}"] = (
+          (x_left, 0.0, z_f),
+          n_left,
+      )
+      point_specs[f"aac_gap_floor_back_{k}"] = (
+          (0.0, y_back, z_f),
+          n_back,
+      )
+
+  if params.g_ceil > constants.GEOM_TOL_M:
+    z_shield_top = params.h_wall - params.g_ceil
+    n_ceil = max(1, int(math.ceil(params.g_ceil / params.dz_wall)))
+    dz_c = params.g_ceil / n_ceil
+    for k in range(n_ceil):
+      z_c = z_shield_top + (k + 0.5) * dz_c
+      point_specs[f"aac_gap_ceil_left_{k}"] = (
+          (x_left, 0.0, z_c),
+          n_left,
+      )
+      point_specs[f"aac_gap_ceil_back_{k}"] = (
+          (0.0, y_back, z_c),
+          n_back,
+      )
+
+  return point_specs
+
+
+def compute_bare_aac_sensor_vfs(
+    mesh: mesh_lib.SurfaceMesh,
+    params: params_lib.SimParams,
+) -> dict[str, np.ndarray]:
+  """Computes view factors for bare corner AAC exposed above/below the shields."""
+  point_specs = bare_aac_sensor_points(params)
+  if not point_specs:
+    return {}
+  return _compute_upper_point_sensor_vfs(
+      mesh=mesh,
+      params=params,
+      point_specs=point_specs,
+      check_shields=True,
+  )
 
 
 def update_ceiling_sensor_vfs(
@@ -1392,9 +1575,12 @@ def update_ceiling_sensor_vfs(
     mesh: mesh_lib.SurfaceMesh,
     params: params_lib.SimParams,
 ) -> ViewFactorSystem:
-  """Returns a ViewFactorSystem with updated ceiling rim sensor view factors."""
-  new_sensor_vf = dict(vf_sys.sensor_vf)
+  """Returns a ViewFactorSystem with updated ceiling and bare-AAC sensor VFs."""
+  new_sensor_vf = {
+      k: v for k, v in vf_sys.sensor_vf.items() if not k.startswith("aac_gap_")
+  }
   new_sensor_vf.update(compute_ceiling_sensor_vfs(mesh=mesh, params=params))
+  new_sensor_vf.update(compute_bare_aac_sensor_vfs(mesh=mesh, params=params))
   return ViewFactorSystem(
       f_eff=vf_sys.f_eff,
       f_room=vf_sys.f_room,

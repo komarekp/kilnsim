@@ -78,6 +78,71 @@ def get_shield_temp_behind_kiln_c(
   return patch.temp_front_c
 
 
+def _solve_point_sensor_balance_k(
+    vf_vec: np.ndarray,
+    radiosity_w_m2: np.ndarray,
+    eps_surface: float,
+    u_backing: float,
+    t_amb_k: float,
+    t_ext_k: float,
+    h_conv_fn,
+) -> float:
+  """Solves radiative-convective-conductive equilibrium at a point sensor."""
+  f_room = max(0.0, 1.0 - float(np.sum(vf_vec)))
+  g_incident = float(np.dot(vf_vec, radiosity_w_m2)) + (
+      f_room * params_lib.STEFAN_BOLTZMANN * (t_amb_k ** 4)
+  )
+  q_abs = eps_surface * g_incident
+
+  def _res(t_k: float) -> float:
+    q_emit = eps_surface * constants.STEFAN_BOLTZMANN * (t_k ** 4)
+    dt = t_k - t_amb_k
+    q_conv = h_conv_fn(dt) * dt
+    q_cond = u_backing * (t_k - t_ext_k)
+    return q_abs - q_emit - q_conv - q_cond
+
+  sol = optimize.root_scalar(
+      _res,
+      bracket=[min(t_amb_k, t_ext_k) - 50.0, max(t_amb_k, t_ext_k) + 500.0],
+      method="brentq",
+  )
+  return float(sol.root)
+
+
+def _solve_horizontal_sensor_temp_k(
+    vf_vec: np.ndarray,
+    radiosity_w_m2: np.ndarray,
+    eps_surface: float,
+    u_backing: float,
+    t_amb_k: float,
+    t_ext_k: float,
+    surface_faces_up: bool,
+) -> float:
+  """Solves a horizontal floor/ceiling sensor using stability-aware h_c."""
+
+  def _h_horiz(dt: float) -> float:
+    is_unstable = (dt > 0.0) if surface_faces_up else (dt < 0.0)
+    if is_unstable:
+      return max(
+          constants.H_CONV_MIN_W_M2K,
+          constants.H_CONV_HORIZ_UNSTABLE_COEFF * (abs(dt) ** 0.25),
+      )
+    return max(
+        constants.H_CONV_STABLE_MIN_W_M2K,
+        constants.H_CONV_HORIZ_STABLE_COEFF * (abs(dt) ** 0.20),
+    )
+
+  return _solve_point_sensor_balance_k(
+      vf_vec=vf_vec,
+      radiosity_w_m2=radiosity_w_m2,
+      eps_surface=eps_surface,
+      u_backing=u_backing,
+      t_amb_k=t_amb_k,
+      t_ext_k=t_ext_k,
+      h_conv_fn=_h_horiz,
+  )
+
+
 def _solve_floor_sensor_temp_k(
     vf_vec: np.ndarray,
     radiosity_w_m2: np.ndarray,
@@ -86,26 +151,59 @@ def _solve_floor_sensor_temp_k(
     t_amb_k: float,
     t_ext_k: float,
 ) -> float:
-  """Solves the local radiative-convective-conductive equilibrium at a point."""
-  f_room = max(0.0, 1.0 - float(np.sum(vf_vec)))
-  g_incident = float(np.dot(vf_vec, radiosity_w_m2)) + (
-      f_room * params_lib.STEFAN_BOLTZMANN * (t_amb_k ** 4)
+  """Solves the local radiative-convective-conductive equilibrium on the floor."""
+  return _solve_horizontal_sensor_temp_k(
+      vf_vec=vf_vec,
+      radiosity_w_m2=radiosity_w_m2,
+      eps_surface=eps_floor,
+      u_backing=u_subfloor,
+      t_amb_k=t_amb_k,
+      t_ext_k=t_ext_k,
+      surface_faces_up=True,
   )
-  q_abs = eps_floor * g_incident
 
-  def _res(t_k: float) -> float:
-    q_emit = eps_floor * constants.STEFAN_BOLTZMANN * (t_k ** 4)
-    h_conv = max(
-        constants.H_CONV_MIN_W_M2K, 1.5 * (abs(t_k - t_amb_k) ** 0.25)
-    )
-    q_conv = h_conv * (t_k - t_amb_k)
-    q_cond = u_subfloor * (t_k - t_ext_k)
-    return q_abs - q_emit - q_conv - q_cond
 
-  sol = optimize.root_scalar(
-      _res, bracket=[t_ext_k - 5.0, t_amb_k + 250.0], method="brentq"
+def _solve_ceiling_sensor_temp_k(
+    vf_vec: np.ndarray,
+    radiosity_w_m2: np.ndarray,
+    eps_ceil: float,
+    u_roof: float,
+    t_amb_k: float,
+    t_ext_k: float,
+) -> float:
+  """Solves the downward-facing ceiling sensor balance at z = h_wall."""
+  return _solve_horizontal_sensor_temp_k(
+      vf_vec=vf_vec,
+      radiosity_w_m2=radiosity_w_m2,
+      eps_surface=eps_ceil,
+      u_backing=u_roof,
+      t_amb_k=t_amb_k,
+      t_ext_k=t_ext_k,
+      surface_faces_up=False,
   )
-  return float(sol.root)
+
+
+def _solve_wall_sensor_temp_k(
+    vf_vec: np.ndarray,
+    radiosity_w_m2: np.ndarray,
+    eps_wall: float,
+    u_wall: float,
+    t_amb_k: float,
+    t_ext_k: float,
+) -> float:
+  """Solves a vertical bare-AAC corner wall point sensor energy balance."""
+  return _solve_point_sensor_balance_k(
+      vf_vec=vf_vec,
+      radiosity_w_m2=radiosity_w_m2,
+      eps_surface=eps_wall,
+      u_backing=u_wall,
+      t_amb_k=t_amb_k,
+      t_ext_k=t_ext_k,
+      h_conv_fn=lambda dt: max(
+          constants.H_CONV_MIN_W_M2K,
+          constants.H_CONV_VERT_SENSOR_COEFF * (abs(dt) ** 0.25),
+      ),
+  )
 
 
 def compute_safety_metrics(
@@ -225,10 +323,30 @@ def compute_safety_metrics(
       stypes == int(mesh_lib.SurfaceType.SHIELD_BACK)
   )
   t_shield_max_c = float(np.max(t_front_c[shield_mask]))
-  t_aac_max_c = float(
-      np.max(solution.chimney.t_aac_front_patch_k[shield_mask])
-      - params_lib.KELVIN_OFFSET
-  )
+  aac_candidates_k = [
+      float(np.max(solution.chimney.t_aac_front_patch_k[shield_mask])),
+      float(np.max(solution.t_back_k[gyp_left_mask | gyp_back_mask])),
+  ]
+  u_aac_bare = 1.0 / ((params.t_aac / params.k_aac) + params_lib.R_SE_WALL)
+  for aac_name, (aac_coord, _) in vf_lib.bare_aac_sensor_points(params).items():
+    if aac_name in vf_sys.sensor_vf:
+      z_pt = aac_coord[2]
+      t_amb_aac_k = (
+          solution.room.t_room_upper_k
+          if z_pt >= solution.room.z_stratification_layer_m
+          else solution.room.t_room_lower_k
+      )
+      aac_candidates_k.append(
+          _solve_wall_sensor_temp_k(
+              vf_vec=vf_sys.sensor_vf[aac_name],
+              radiosity_w_m2=solution.radiosity_w_m2,
+              eps_wall=params.eps_aac,
+              u_wall=u_aac_bare,
+              t_amb_k=t_amb_aac_k,
+              t_ext_k=params.t_ext_k,
+          )
+      )
+  t_aac_max_c = max(aac_candidates_k) - params_lib.KELVIN_OFFSET
   v_chimney_max = max(
       float(np.max(solution.chimney.v_gap_left)),
       float(np.max(solution.chimney.v_gap_back)),
@@ -247,27 +365,34 @@ def compute_safety_metrics(
       * uncaptured_chimney_frac
       * max(0.0, t_chimney_exit_max_k - solution.room.t_room_upper_k)
   )
-  t_ceil_hood_corner_k = _solve_floor_sensor_temp_k(
+  uncaptured_plume_frac = 1.0 - solution.room.plume_capture_fraction
+  t_amb_ceil_hood_k = (
+      solution.room.t_room_upper_k
+      + constants.PLUME_CEILING_MIXING_FRACTION
+      * uncaptured_plume_frac
+      * max(0.0, solution.room.t_plume_at_hood_k - solution.room.t_room_upper_k)
+  )
+  t_ceil_hood_corner_k = _solve_ceiling_sensor_temp_k(
       vf_vec=vf_sys.sensor_vf["ceiling_hood_rim_corner"],
       radiosity_w_m2=solution.radiosity_w_m2,
-      eps_floor=params.eps_gypsum,
-      u_subfloor=params.u_roof,
-      t_amb_k=solution.room.t_room_upper_k,
+      eps_ceil=params.eps_gypsum,
+      u_roof=params.u_roof,
+      t_amb_k=t_amb_ceil_hood_k,
       t_ext_k=params.t_ext_k,
   )
-  t_ceil_hood_room_k = _solve_floor_sensor_temp_k(
+  t_ceil_hood_room_k = _solve_ceiling_sensor_temp_k(
       vf_vec=vf_sys.sensor_vf["ceiling_hood_rim_room"],
       radiosity_w_m2=solution.radiosity_w_m2,
-      eps_floor=params.eps_gypsum,
-      u_subfloor=params.u_roof,
-      t_amb_k=solution.room.t_room_upper_k,
+      eps_ceil=params.eps_gypsum,
+      u_roof=params.u_roof,
+      t_amb_k=t_amb_ceil_hood_k,
       t_ext_k=params.t_ext_k,
   )
-  t_ceil_chimney_k = _solve_floor_sensor_temp_k(
+  t_ceil_chimney_k = _solve_ceiling_sensor_temp_k(
       vf_vec=vf_sys.sensor_vf["ceiling_chimney_corner"],
       radiosity_w_m2=solution.radiosity_w_m2,
-      eps_floor=params.eps_gypsum,
-      u_subfloor=params.u_roof,
+      eps_ceil=params.eps_gypsum,
+      u_roof=params.u_roof,
       t_amb_k=t_amb_ceil_chimney_k,
       t_ext_k=params.t_ext_k,
   )

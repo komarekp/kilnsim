@@ -37,6 +37,10 @@ H_CONV_MIN_W_M2K: float = 2.0  # W / (m^2 * K) natural convection floor clamp
 H_CONV_UNDER_REFLECTOR_W_M2K: float = 3.0  # W / (m^2 * K) under elevated reflector
 H_CONV_SSR_INTERNAL_W_M2K: float = 5.5  # W / (m^2 * K) internal SSR housing wall
 H_CONV_CEILING_JET_MIN_W_M2K: float = 2.0  # W / (m^2 * K) downward-facing floor
+H_CONV_HORIZ_UNSTABLE_COEFF: float = 1.52
+H_CONV_HORIZ_STABLE_COEFF: float = 0.65
+H_CONV_STABLE_MIN_W_M2K: float = 0.5
+H_CONV_VERT_SENSOR_COEFF: float = 1.42
 
 # SSR louvered enclosure model constants
 SSR_LOUVER_EFF_AREA_M2: float = 0.0022  # m^2 effective free louver area
@@ -90,6 +94,7 @@ CHIMNEY_CAVITY_CONV_COEFF: float = 0.42
 CHIMNEY_CAVITY_PR_EXP: float = 0.012
 CHIMNEY_CAVITY_ASPECT_EXP: float = -0.3
 CHIMNEY_CEILING_MIXING_FRACTION: float = 0.35
+PLUME_CEILING_MIXING_FRACTION: float = 0.35
 MTT_PLUME_FLOW_COEFF: float = 0.071
 MTT_SOURCE_ENTRAINMENT_COEFF: float = 0.018
 HESKESTAD_VIRTUAL_ORIGIN_DIAM_COEFF: float = 1.02
