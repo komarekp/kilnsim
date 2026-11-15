@@ -86,6 +86,10 @@ MAX_SENSOR_VF_SUM: float = 0.99
 # ---------------------------------------------------------------------------
 # Plume, chimney, hood & two-zone room constants
 # ---------------------------------------------------------------------------
+CHIMNEY_LAMINAR_NU_DH: float = 7.54
+CHIMNEY_CAVITY_CONV_COEFF: float = 0.42
+CHIMNEY_CAVITY_PR_EXP: float = 0.012
+CHIMNEY_CAVITY_ASPECT_EXP: float = -0.3
 CHIMNEY_CEILING_MIXING_FRACTION: float = 0.35
 MTT_PLUME_FLOW_COEFF: float = 0.071
 MTT_SOURCE_ENTRAINMENT_COEFF: float = 0.018

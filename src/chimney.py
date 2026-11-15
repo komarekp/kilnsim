@@ -151,19 +151,46 @@ def _solve_wall_columns(
 
   t_mean_shield = np.mean(t_shield_back_grid, axis=1)
   ra_gap = (
-      params_lib.GRAVITY
+      constants.GRAVITY
       * np.maximum(0.0, t_mean_shield - t_inlet_k)
       * (d_eff ** 3)
       / (t_inlet_k * AIR_NU * (AIR_NU / AIR_PR))
   )
   nu_nat = 0.22 * (ra_gap ** 0.28)
+  aspect_ratio = max(h_shield, 0.1) / d_eff
 
   for _ in range(6):
     re_d = v_guess * d_hyd / AIR_NU
     gz = (d_hyd / max(h_shield, 0.1)) * re_d * AIR_PR
-    nu_forced = 7.54 + (0.03 * gz) / (1.0 + 0.016 * (gz ** (2.0 / 3.0)))
+    nu_forced = constants.CHIMNEY_LAMINAR_NU_DH + (0.03 * gz) / (
+        1.0 + 0.016 * (gz ** (2.0 / 3.0))
+    )
     nu_chan = np.sqrt(nu_forced * nu_forced + nu_nat * nu_nat)
-    h_chan = np.maximum(3.5, (nu_chan * AIR_K) / d_hyd)
+    h_chan_open = (nu_chan * AIR_K) / d_hyd
+
+    # Stagnant closed cavity: parallel-plate cross-gap convective conductance is
+    # 0.5 * h_chan, so h_chan_closed = 2 * Nu_cavity * k_air / d_eff gives the
+    # exact k_air / d_eff conduction limit when Ra_cavity is sub-critical.
+    dt_cav = np.abs(np.mean(t_shield_back_grid - t_aac_grid, axis=1))
+    t_cav_mean = np.maximum(
+        constants.SOLVER_MIN_TEMP_K,
+        0.5 * np.mean(t_shield_back_grid + t_aac_grid, axis=1),
+    )
+    ra_cav = (
+        constants.GRAVITY
+        * dt_cav
+        * (d_eff ** 3)
+        / (t_cav_mean * AIR_NU * (AIR_NU / AIR_PR))
+    )
+    nu_cav = np.maximum(
+        1.0,
+        constants.CHIMNEY_CAVITY_CONV_COEFF
+        * (np.maximum(ra_cav, 1e-12) ** 0.25)
+        * (AIR_PR ** constants.CHIMNEY_CAVITY_PR_EXP)
+        * (aspect_ratio ** constants.CHIMNEY_CAVITY_ASPECT_EXP),
+    )
+    h_chan_closed = 2.0 * nu_cav * (AIR_K / d_eff)
+    h_chan = np.where(open_flow_mask, h_chan_open, h_chan_closed)
 
     t_rad_mean = 0.5 * (t_shield_back_grid + t_aac_grid)
     h_rad_gap = (
