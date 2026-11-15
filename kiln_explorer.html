@@ -411,11 +411,30 @@ const LIMITS = {
   ceiling: 40.0,
   ssr_air: 35.0,
   ssr_case: 45.0,
-  pad: 60.0,
-  calsil: 80.0,
   vip: 50.0,
-  vinyl: 45.0
+  vinyl: 45.0,
+  shield: 250.0,
+  aac: 120.0
 };
+
+function computeSafetyFlags(m) {
+  const gyp_left = m.t_gypsum_max_left_c < LIMITS.gypsum;
+  const gyp_back = m.t_gypsum_max_back_c < LIMITS.gypsum;
+  const vip_under = m.t_vip_under_reflector_c < LIMITS.vip;
+  const vip_out = m.t_vip_outside_reflector_c < LIMITS.vip;
+  return {
+    ceiling: m.t_ceiling_max_c < LIMITS.ceiling,
+    gyp_left,
+    gyp_back,
+    gypsum: gyp_left && gyp_back,
+    ssr: m.t_ssr_air_c < LIMITS.ssr_air && m.t_ssr_case_c < LIMITS.ssr_case,
+    vip_under,
+    vip_out,
+    vinyl: m.t_vinyl_edge_c < LIMITS.vinyl,
+    shield: m.t_shield_max_c < LIMITS.shield,
+    aac: m.t_aac_max_c < LIMITS.aac
+  };
+}
 
 const state = {
   view: 'plan', // 'side', 'front', or 'plan'
@@ -791,19 +810,20 @@ function renderElevation() {
   const r_outer_sensor = r_ref > 0 ? r_shadow_near : GEOM.r_kiln;
   const c_pad_out = c_kiln + (r_outer_sensor + 20) * Math.SQRT1_2;
 
+  const sf = computeSafetyFlags(m);
   const sensors = [
     { id: "duct_air", label: "Exhaust Duct Air", temp: m.t_exhaust_duct_c, safe: true, c: c_kiln, y_px: y_ceil },
-    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, c: c_ceil, y_px: y_ceil },
-    { id: "gyp", label: isSide ? "Gypsum Max (Left)" : "Gypsum Max (Back)", temp: isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c, safe: (isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c) < LIMITS.gypsum, c: c_shield_end + 35, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) },
+    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: sf.ceiling, c: c_ceil, y_px: y_ceil },
+    { id: "gyp", label: isSide ? "Gypsum Max (Left)" : "Gypsum Max (Back)", temp: isSide ? m.t_gypsum_max_left_c : m.t_gypsum_max_back_c, safe: isSide ? sf.gyp_left : sf.gyp_back, c: c_shield_end + 35, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) },
     { id: "kiln_skin", label: "Kiln Skin Max", temp: m.t_kiln_skin_max_c, safe: true, c: c_kiln - GEOM.r_kiln, y_px: zToSvg(z_drum_bot + 0.35 * GEOM.h_drum) },
-    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: true, c: c_shield_start, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) },
-    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, c: -100, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) + 46 },
-    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air && m.t_ssr_case_c < LIMITS.ssr_case, c: c_ssr, y_px: y_ssr_top_px + 24 },
-    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, c: c_kiln - 24, y_px: y_floor - 4 },
-    { id: "vip_under", label: "VIP Under Kiln Center", temp: m.t_vip_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.vip, c: c_kiln + 24, y_px: 0.5 * (y_screed_bot + y_vip_bot) },
-    { id: "pad_edge", label: "Pad Outside Reflector", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, c: c_pad_out - 18, y_px: y_floor - 4 },
-    { id: "vip_out", label: "VIP Outside Reflector", temp: m.t_vip_outside_reflector_c, safe: m.t_vip_outside_reflector_c < LIMITS.vip, c: c_pad_out + 18, y_px: 0.5 * (y_screed_bot + y_vip_bot) },
-    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, c: state.w_floor_pad_mm + 25, y_px: y_floor - 4 }
+    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: sf.shield, c: c_shield_start, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) },
+    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: sf.aac, c: -100, y_px: zToSvg(z_drum_bot + 0.5 * GEOM.h_drum) + 46 },
+    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: sf.ssr, c: c_ssr, y_px: y_ssr_top_px + 24 },
+    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: sf.vip_under, c: c_kiln - 24, y_px: y_floor - 4 },
+    { id: "vip_under", label: "VIP Under Kiln Center", temp: m.t_vip_under_reflector_c, safe: sf.vip_under, c: c_kiln + 24, y_px: 0.5 * (y_screed_bot + y_vip_bot) },
+    { id: "pad_edge", label: "Pad Outside Reflector", temp: m.t_floor_pad_edge_c, safe: sf.vip_out, c: c_pad_out - 18, y_px: y_floor - 4 },
+    { id: "vip_out", label: "VIP Outside Reflector", temp: m.t_vip_outside_reflector_c, safe: sf.vip_out, c: c_pad_out + 18, y_px: 0.5 * (y_screed_bot + y_vip_bot) },
+    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: sf.vinyl, c: state.w_floor_pad_mm + 25, y_px: y_floor - 4 }
   ];
 
   const U_L = getU(isSide ? C_MAX : C_MIN), U_R = getU(isSide ? C_MIN : C_MAX);
@@ -903,18 +923,19 @@ function renderPlanView(svg, m) {
   const r_shadow_near = r_ref + Math.max(0, r_ref - GEOM.r_kiln) * (dz_gap / dz_kiln_ref);
   const r_outer_sensor = r_ref > 0 ? r_shadow_near : GEOM.r_kiln;
 
+  const sf = computeSafetyFlags(m);
   const sensors = [
     { id: "duct_air", label: "Exhaust Duct Air", temp: m.t_exhaust_duct_c, safe: true, x: x_kiln, y: y_kiln + 50 },
-    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: m.t_ceiling_max_c < LIMITS.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln + r_ceil * Math.SQRT1_2 },
-    { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: m.t_gypsum_max_left_c < LIMITS.gypsum, x: GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left + 45, y: 12.5 },
-    { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: m.t_gypsum_max_back_c < LIMITS.gypsum, x: 12.5, y: GEOM.d_chimney + GEOM.w_shield_back + 45 },
+    { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: sf.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln + r_ceil * Math.SQRT1_2 },
+    { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: sf.gyp_left, x: GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left + 45, y: 12.5 },
+    { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: sf.gyp_back, x: 12.5, y: GEOM.d_chimney + GEOM.w_shield_back + 45 },
     { id: "kiln_skin", label: "Kiln Skin Max", temp: m.t_kiln_skin_max_c, safe: true, x: x_kiln - GEOM.r_kiln * Math.SQRT1_2, y: y_kiln - GEOM.r_kiln * Math.SQRT1_2 },
-    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: m.t_shield_max_c < LIMITS.calsil, x: x_kiln, y: 6 },
-    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: true, x: x_kiln, y: -100 },
-    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: m.t_ssr_air_c < LIMITS.ssr_air, x: x_kiln + (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, y: y_kiln - (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2 },
-    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: m.t_vip_under_reflector_c < LIMITS.pad, x: x_kiln, y: y_kiln },
-    { id: "pad_edge", label: "Pad At Reflector Edge", temp: m.t_floor_pad_edge_c, safe: m.t_vip_outside_reflector_c < LIMITS.pad, x: x_kiln + (r_outer_sensor + 20) * Math.SQRT1_2, y: y_kiln + (r_outer_sensor + 20) * Math.SQRT1_2 },
-    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: m.t_vinyl_edge_c < LIMITS.vinyl, x: state.w_floor_pad_mm + 25, y: y_kiln }
+    { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: sf.shield, x: x_kiln, y: 6 },
+    { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: sf.aac, x: x_kiln, y: -100 },
+    { id: "ssr", label: "SSR Internal Air", temp: m.t_ssr_air_c, safe: sf.ssr, x: x_kiln + (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2, y: y_kiln - (GEOM.r_kiln + GEOM.d_ssr/2) * Math.SQRT1_2 },
+    { id: "pad_under", label: "Pad Under Reflector", temp: m.t_floor_pad_under_reflector_c, safe: sf.vip_under, x: x_kiln, y: y_kiln },
+    { id: "pad_edge", label: "Pad At Reflector Edge", temp: m.t_floor_pad_edge_c, safe: sf.vip_out, x: x_kiln + (r_outer_sensor + 20) * Math.SQRT1_2, y: y_kiln + (r_outer_sensor + 20) * Math.SQRT1_2 },
+    { id: "vinyl", label: "Vinyl Edge", temp: m.t_vinyl_edge_c, safe: sf.vinyl, x: state.w_floor_pad_mm + 25, y: y_kiln }
   ];
 
   // Boundaries in SVG pixels:
@@ -937,17 +958,18 @@ function renderSidebarMetrics(m) {
   document.getElementById('plume-summary').textContent =
     `Plume Capture: ${m.plume_capture_fraction.toFixed(1)}% (${m.plume_fully_captured ? 'Full Capture' : 'Partial Spill'})`;
 
+  const sf = computeSafetyFlags(m);
   const items = [
     { name: "Kiln Skin Max Temp", val: `${m.t_kiln_skin_max_c.toFixed(1)} °C`, lim: "Drum Exterior", ok: true },
-    { name: "Ceiling Max Temp", val: `${m.t_ceiling_max_c.toFixed(1)} °C`, lim: "< 40.0 °C", ok: m.t_ceiling_max_c < LIMITS.ceiling },
-    { name: "Gypsum Max (Left / Back)", val: `${m.t_gypsum_max_left_c.toFixed(1)} / ${m.t_gypsum_max_back_c.toFixed(1)} °C`, lim: "< 40.0 °C", ok: m.t_gypsum_max_left_c < LIMITS.gypsum },
-    { name: "SSR Air / Casing", val: `${m.t_ssr_air_c.toFixed(1)} / ${m.t_ssr_case_c.toFixed(1)} °C`, lim: "< 35 / 45 °C", ok: m.t_ssr_air_c < LIMITS.ssr_air && m.t_ssr_case_c < LIMITS.ssr_case },
-    { name: "VIP Under Reflector", val: `${m.t_vip_under_reflector_c.toFixed(1)} °C`, lim: "< 50.0 °C", ok: m.t_vip_under_reflector_c < LIMITS.vip },
-    { name: "Pad Under Reflector", val: `${m.t_floor_pad_under_reflector_c.toFixed(1)} °C`, lim: "Ref. Center", ok: m.t_vip_under_reflector_c < LIMITS.vip },
-    { name: "VIP Outside Reflector", val: `${m.t_vip_outside_reflector_c.toFixed(1)} °C`, lim: "< 50.0 °C", ok: m.t_vip_outside_reflector_c < LIMITS.vip },
-    { name: "Pad Outside Reflector", val: `${m.t_floor_pad_edge_c.toFixed(1)} °C`, lim: "Shadow Edge", ok: m.t_vip_outside_reflector_c < LIMITS.vip },
-    { name: "Vinyl Floor Edge", val: `${m.t_vinyl_edge_c.toFixed(1)} °C`, lim: "< 45.0 °C", ok: m.t_vinyl_edge_c < LIMITS.vinyl },
-    { name: "Calsil Shield / AAC Max", val: `${m.t_shield_max_c.toFixed(1)} / ${m.t_aac_max_c.toFixed(1)} °C`, lim: "Behind Kiln", ok: true },
+    { name: "Ceiling Max Temp", val: `${m.t_ceiling_max_c.toFixed(1)} °C`, lim: "< 40.0 °C", ok: sf.ceiling },
+    { name: "Gypsum Max (Left / Back)", val: `${m.t_gypsum_max_left_c.toFixed(1)} / ${m.t_gypsum_max_back_c.toFixed(1)} °C`, lim: "< 40.0 °C", ok: sf.gypsum },
+    { name: "SSR Air / Casing", val: `${m.t_ssr_air_c.toFixed(1)} / ${m.t_ssr_case_c.toFixed(1)} °C`, lim: "< 35 / 45 °C", ok: sf.ssr },
+    { name: "VIP Under Reflector", val: `${m.t_vip_under_reflector_c.toFixed(1)} °C`, lim: "< 50.0 °C", ok: sf.vip_under },
+    { name: "Pad Under Reflector", val: `${m.t_floor_pad_under_reflector_c.toFixed(1)} °C`, lim: "Ref. Center", ok: sf.vip_under },
+    { name: "VIP Outside Reflector", val: `${m.t_vip_outside_reflector_c.toFixed(1)} °C`, lim: "< 50.0 °C", ok: sf.vip_out },
+    { name: "Pad Outside Reflector", val: `${m.t_floor_pad_edge_c.toFixed(1)} °C`, lim: "Shadow Edge", ok: sf.vip_out },
+    { name: "Vinyl Floor Edge", val: `${m.t_vinyl_edge_c.toFixed(1)} °C`, lim: "< 45.0 °C", ok: sf.vinyl },
+    { name: "Calsil Shield / AAC Max", val: `${m.t_shield_max_c.toFixed(1)} / ${m.t_aac_max_c.toFixed(1)} °C`, lim: "< 250 / 120 °C", ok: sf.shield && sf.aac },
     { name: "Exhaust Duct Air (Ceiling)", val: `${m.t_exhaust_duct_c.toFixed(1)} °C`, lim: "Inside Ø200 Duct", ok: true },
     { name: "Room Air (Upper / Lower)", val: `${m.t_room_upper_c.toFixed(1)} / ${m.t_room_lower_c.toFixed(1)} °C`, lim: `z = ${m.z_stratification_layer_mm} mm`, ok: true }
   ];

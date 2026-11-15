@@ -17,6 +17,8 @@ LIMIT_SSR_AIR_C: float = constants.LIMIT_SSR_AIR_C
 LIMIT_SSR_CASE_C: float = constants.LIMIT_SSR_CASE_C
 LIMIT_VIP_C: float = constants.LIMIT_VIP_C
 LIMIT_VINYL_C: float = constants.LIMIT_VINYL_C
+LIMIT_SHIELD_C: float = constants.LIMIT_SHIELD_C
+LIMIT_AAC_C: float = constants.LIMIT_AAC_C
 
 # Floor surface emissivities and under-reflector / ceiling mixing coefficients.
 FLOOR_PAD_EMISSIVITY: float = constants.FLOOR_PAD_EMISSIVITY

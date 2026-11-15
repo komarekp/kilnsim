@@ -93,3 +93,13 @@ py_test(
         "//src:io_manager",
     ],
 )
+
+py_test(
+    name = "kiln_explorer_test",
+    size = "small",
+    srcs = ["kiln_explorer_test.py"],
+    data = ["//:kiln_explorer.html"],
+    deps = [
+        "//src:constants",
+    ],
+)

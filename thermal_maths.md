@@ -196,8 +196,8 @@ The studio subfloor below $z = 0$ consists of a 150 mm structural concrete slab,
 | $z\_{\text{hood,inlet}}$ \newline `z_hood_inlet` | $H\_{\text{wall}} - z\_{\text{hood\_drop}}$ | mm | Elevation of canopy hood capture mouth above screed ($z = 0$). |
 | $d\_{\text{eff}}$ \newline `d_chimney_eff` | $d\_{\text{chimney}} (1 - f\_{\text{block}})$ | mm | Effective hydraulic depth of behind-shield chimney channel. |
 | $U\_{\text{aac\_wall}}$ \newline `u_aac_wall` | $\left( R\_{si} + \frac{t\_{\text{aac}}}{k\_{\text{aac}}} + R\_{se} \right)^{-1}$ | $\text{W/m}^2\text{K}$ | Unshielded thermal transmittance of bare AAC block wall ($R\_{si}=0.13, R\_{se}=0.04$). |
-| $(UA)\_{\text{upper}}$ \newline `compute_ua_upper_zone` | $U\_{\text{roof}} A\_{\text{roof}} + U\_{\text{aac}} A\_{\text{wall,up}} + U\_{\text{door}} A\_{\text{door,up}}$ | W/K | Parallel envelope thermal conductance of upper room gas layer above $z\_{\text{layer}}$. |
-| $(UA)\_{\text{lower}}$ \newline `compute_ua_lower_zone` | $U\_{\text{aac}} A\_{\text{wall,low}} + U\_{\text{door}} A\_{\text{door,low}} + U\_{\text{subfloor}} A\_{\text{floor}}$ | W/K | Parallel envelope thermal conductance of lower room zone below $z\_{\text{layer}}$. |
+| $(UA)\_{\text{upper}}$ \newline `compute_ua_upper_zone` | $U\_{\text{roof}} A\_{\text{roof}} + U\_{\text{aac}} A\_{\text{wall,up}} + U\_{\text{door}} A\_{\text{door,up}}$ | W/K | Parallel envelope thermal conductance of upper room gas layer above $z\_{\text{layer}}$ using unmeshed opaque wall perimeter. |
+| $(UA)\_{\text{lower}}$ \newline `compute_ua_lower_zone` | $U\_{\text{aac}} A\_{\text{wall,low}} + U\_{\text{door}} A\_{\text{door,low}} + U\_{\text{subfloor}} A\_{\text{floor,excl}}$ | W/K | Parallel envelope conductance of lower zone below $z\_{\text{layer}}$, excluding under-kiln/reflector circular disk $\max(R\_{\text{kiln}}, R\_{\text{reflector}})$. |
 
 ---
 
@@ -222,33 +222,35 @@ where:
    - **Curved Kiln Jacket Patches:** Evaluated on the true cylindrical surface radius at midpoint angle $\theta\_c = (\theta\_0 + \theta\_1)/2$ and midpoint height $z\_c = (z\_0 + z\_1)/2$:
      $$\vec{r}\_m = \left( x\_k + R\_{\text{kiln}} \cos\theta\_c, \; y\_k + R\_{\text{kiln}} \sin\theta\_c, \; z\_c \right), \quad \vec{n}\_m = \left( \cos\theta\_c, \; \sin\theta\_c, \; 0 \right)$$
 2. **Direct Diffuse View Factors ($F\_{m \to n}$):**
-   - Computed via the double-area contour integral formula with numerical line-of-sight ray tracing to verify visibility against occlusion by the central kiln cylinder.
-   - For coaxial parallel disks (kiln bottom plate disk to circular reflector disk separated by axial gap $h = z\_{\text{drum,bot}} - z\_{\text{reflector,top}}$), exact analytical view factors are used:
+   - Computed between meshed patches with 3D line-of-sight ray tracing against solid blockers: the central kiln cylinder, the overhead frustum exhaust hood, the circular floor reflector disk, and (for upper/AAC wall point sensors) the corner shields.
+   - Single-patch circular horizontal faces (`KILN_LID`, `KILN_BOTTOM`, and `REFLECTOR_TOP`) are evaluated via polar finite-disk quadrature so grazing-angle and near-disk exchange remains accurate.
+   - For coaxial parallel disks (`KILN_BOTTOM` to `REFLECTOR_TOP` separated by axial gap $h = z\_{\text{drum,bot}} - z\_{\text{reflector,top}}$), the exact analytical coaxial-disk view factor is used:
      $$F\_{1 \to 2} = \frac{1}{2} \left[ S - \sqrt{S^2 - 4 \left( \frac{r\_2}{r\_1} \right)^2} \right], \quad S = 1 + \frac{1 + (r\_2/h)^2}{(r\_1/h)^2}$$
 3. **Specular Floor Reflector Virtual Image:**
-   - Radiation reflecting specularly off the circular polished stainless steel reflector ($\varepsilon\_{\text{reflector}} = 0.15, \rho\_s = 0.85$) is modeled by constructing a virtual mirror-image kiln bottom disk at elevation:
-     $$z\_{\text{mirror}} = 2 z\_{\text{reflector,top}} - z\_{\text{drum,bot}}$$
-   - The effective view factor matrix combines direct diffuse exchange and mirror reflections:
+   - Specular reflection off the circular polished stainless steel reflector ($\varepsilon\_{\text{reflector}}, \; \rho\_s = 1 - \varepsilon\_{\text{reflector}}$) is modeled by constructing virtual mirror images reflected across $z = z\_{\text{reflector,top}}$ (for instance, the kiln bottom disk at $z\_{\text{mirror}} = 2 z\_{\text{reflector,top}} - z\_{\text{drum,bot}}$), requiring the bounce intersection point to fall on the exposed reflector annulus $R\_{\text{kiln}} \le r\_{\text{hit}} \le R\_{\text{reflector}}$ and pass incoming/outgoing solid-body occlusion checks.
+   - Coaxial multiple mirror self-return between `KILN_BOTTOM` and itself across the parallel polished `REFLECTOR_TOP` is summed explicitly via image-disk quadrature.
+   - The effective view factor matrix combines direct diffuse exchange and specular reflections:
      $$F\_{\text{eff},mn} = F\_{\text{direct},mn} + \rho\_s F\_{\text{mirror},mn}$$
    - Row conservation to the open ambient room enclosure satisfies:
-     $$F\_{\text{room},m} = 1 - \sum\_n F\_{\text{eff},mn}$$
+     $$F\_{\text{room},m} = \max\!\left(0, \; 1 - \sum\_n F\_{\text{eff},mn}\right)$$
 4. **Radiosity System Solve:**
-   - The radiosity vector $J$ ($\text{W/m}^2$) solves the pre-factored linear system:
-     $$\left[ I - (1 - \varepsilon) F\_{\text{eff}} \right] J = \varepsilon \sigma T^4 + (1 - \varepsilon) F\_{\text{room}} \sigma T\_{\text{room}}^4$$
-   - Net outgoing radiative flux is computed as:
-     $$q''\_{\text{rad,net},m} = \frac{\varepsilon\_m}{1 - \varepsilon\_m} \left( \sigma T\_m^4 - J\_m \right)$$
+   - Setting diffuse reflectance $\rho\_{d,m} = 0$ on the specular `REFLECTOR_TOP` patch (since $\rho\_s$ is already carried explicitly in $F\_{\text{mirror}}$) and $\rho\_{d,m} = 1 - \varepsilon\_m$ on diffuse patches, the radiosity vector $J$ ($\text{W/m}^2$) solves:
+     $$\left[ I - \text{diag}(\rho\_d) F\_{\text{eff}} \right] J = e\_b + \rho\_d \circ F\_{\text{room}} \sigma T\_{\text{room}}^4$$
+     where $e\_{b,m} = \sigma T\_m^4$ on `REFLECTOR_TOP` and $\varepsilon\_m \sigma T\_m^4$ elsewhere.
+   - Net outgoing radiative flux follows the Oppenheim surface-irradiation balance (valid even as $\varepsilon\_m \to 1$ or on specular `REFLECTOR_TOP`):
+     $$G\_m = \sum\_n F\_{\text{eff},mn} J\_n + F\_{\text{room},m} \sigma T\_{\text{room},m}^4, \qquad q''\_{\text{rad,net},m} = \varepsilon\_m \left( \sigma T\_m^4 - G\_m \right)$$
 
 ### 4.3 Behind-Shield Chimney Buoyant Channel Flow
 
 The simulator resolves all three possible physical regimes in the behind-shield chimney:
 1. **Flush Solid Contact ($d\_{\text{chimney}} \le 1\text{ mm}$):**
    - Natural draft velocity is zero ($v\_{\text{ch}} = 0$).
-   - Heat transfers from the shield back face through the bare AAC block wall via direct 1D solid conduction in series with the exterior film resistance:
+   - Heat transfers from the shield front/back interface through the bare AAC block wall via direct 1D solid conduction in series with the exterior film resistance:
      $$q''\_{\text{back}} = \frac{T\_{\text{shield,back}} - T\_{\text{ext}}}{\frac{t\_{\text{aac}}}{k\_{\text{aac}}} + R\_{se}}$$
 2. **Stagnant Closed Cavities ($g\_{\text{floor}} = 0$ or $g\_{\text{ceil}} = 0$):**
    - Natural draft velocity is zero ($v\_{\text{ch}} = 0$).
-   - Heat transfers across the stagnant air gap via parallel conduction and radiative exchange:
-     $$q''\_{\text{gap}} = \left( \frac{k\_{\text{air}}}{d\_{\text{eff}}} + h\_{\text{rad,gap}} \right) \left( T\_{\text{shield,back}} - T\_{\text{aac,front}} \right) = \frac{T\_{\text{aac,front}} - T\_{\text{ext}}}{\frac{t\_{\text{aac}}}{k\_{\text{aac}}} + R\_{se}}$$
+   - Heat conducts from shield front face through the closed cavity series resistance ($R\_{\text{gap}} = \left(\frac{k\_{\text{air}}}{d\_{\text{eff}}} + h\_{\text{rad,gap}}\right)^{-1}$ in series with $t\_{\text{shield}}/k\_{\text{shield}}$ and $t\_{\text{aac}}/k\_{\text{aac}} + R\_{se}$):
+     $$q''\_{\text{gap}} = \frac{T\_{\text{shield,back}} - T\_{\text{aac,front}}}{R\_{\text{gap}}} = \frac{T\_{\text{aac,front}} - T\_{\text{ext}}}{\frac{t\_{\text{aac}}}{k\_{\text{aac}}} + R\_{se}}$$
 3. **Open Buoyant Natural Draft Channel ($d\_{\text{chimney}} > 0, g\_{\text{floor}} > 0, g\_{\text{ceil}} > 0$):**
    - Hydrostatic buoyancy driving pressure balances inlet orifice turning loss, Darcy-Weisbach duct friction, and ceiling discharge loss:
      $$\Delta P\_{\text{buoy}} = \rho\_\infty g H\_{\text{shield}} \left( 1 - \frac{T\_{\text{lower}}}{\overline{T}\_{\text{ch}}} \right) = \frac{1}{2} \rho\_{\text{ch}} v\_{\text{ch}}^2 \left[ K\_{\text{in,eff}} + f\_{\text{D}} \frac{H\_{\text{shield}}}{2 d\_{\text{eff}}} + K\_{\text{out}}\left(\frac{d\_{\text{eff}}}{g\_{\text{ceil}}}\right) \right]$$
@@ -262,9 +264,8 @@ The simulator resolves all three possible physical regimes in the behind-shield 
 To evaluate thermal protection of the subfloor VIP layer ($z = -t\_{\text{screed}}$) and surrounding vinyl ($z = 0$), the model solves three coupled floor zones:
 
 1. **Center of Kiln / Under-Reflector Zone ($r \le D\_{\text{reflector}}/2$):**
-   - The top surface of the reflector ($z = z\_{\text{reflector,top}}$) absorbs $(1 - \rho\_s) q''\_{\text{inc,base}}$ from the kiln bottom disk.
-   - **Flush Reflector ($g\_{\text{floor\_reflector}} = 0\text{ mm}$):** Heat conducts directly through $t\_{\text{reflector\_calsil}}$, $t\_{\text{floor\_pad}}$, $t\_{\text{screed}}$, and $t\_{\text{vip}}/k\_{\text{vip}}$ in series to the structural slab ($T\_{\text{ext}}$).
-   - **Air-Gapped Reflector ($g\_{\text{floor\_reflector}} > 0\text{ mm}$):** Natural convection ($h\_{\text{conv}} \approx 3.0\ \text{W/m}^2\text{K}$) and across-gap radiation cool the underside of the reflector pan to the lower room air stream, significantly reducing heat delivered into the floor pad below.
+   - Solved via a unified 1D multi-node thermal column (`solve_under_reflector_column`) shared by both the coupled Newton solver and post-processing metrics.
+   - The top reflector face ($z = z\_{\text{reflector,top}}$) conducts through $t\_{\text{reflector\_calsil}}/k\_{\text{shield}}$ to the pan underside node ($T\_{\text{ref,bot}}$). When $g\_{\text{floor\_reflector}} = 0$, the pan underside conducts directly into the floor pad center node ($T\_{\text{pad,center}}$) and subfloor VIP; when $g\_{\text{floor\_reflector}} > 0$, parallel natural convection ($h\_{\text{conv}} = 3.0\ \text{W/m}^2\text{K}$ to $T\_{\text{lower}}$) and across-gap radiation (using $\varepsilon\_{\text{shield}}$ when CalSil-backed or $\varepsilon\_{\text{reflector}}$ when bare stainless steel) cool the underside before reaching the floor pad center.
 2. **Floor Pad Outside Reflector Rim:**
    - Evaluates point sensors on the exposed tile/pad along the corner diagonal (`pad_edge_corner`) and room diagonal (`pad_edge_room`), plus a dense radial candidate grid spanning the reflector optical shadow and penumbra up to the floor pad edge (`pad_outside_corner_*`, `pad_outside_room_*`).
    - Each sensor solves the local radiative-convective-conductive equilibrium:
@@ -281,32 +282,34 @@ To evaluate thermal protection of the subfloor VIP layer ($z = -t\_{\text{screed
 2. **Virtual Origin & Standoff Image Multiplier ($m\_{\text{eff}}$):**
    - Virtual origin of the finite area source:
      $$z\_v = z\_{\text{kiln,top}} - 1.02 D\_{\text{kiln}} + 0.083 \left( \frac{\dot{Q}\_{\text{plume}}}{1000} \right)^{2/5}$$
-   - Effective standoff distance to corner shields: $s\_{\text{eff}} = \min(s\_{\text{kiln,left}}, s\_{\text{kiln,back}}) + R\_{\text{kiln}}$.
-   - Mowrer-Williamson corner image multiplier at hood height:
-     $$m\_{\text{eff}} = 1 + 3 \exp\left( - \left[ \frac{s\_{\text{eff}}}{0.12 (z\_{\text{hood,inlet}} - z\_v)} \right]^2 \right)$$
-3. **Plume Flow & Capture Radius at Hood Inlet:**
+   - Let $r\_p(\Delta z) = 0.12 \Delta z\_{\text{plume}}$ be the half-width Gaussian plume scale at height $\Delta z\_{\text{plume}} = \max(0.05, z\_{\text{hood,inlet}} - z\_v)$, and let $w\_{\text{left}} = \exp(-(s\_{\text{left}}/r\_p)^2)$ and $w\_{\text{back}} = \exp(-(s\_{\text{back}}/r\_p)^2)$ be smooth wall-proximity weights from the kiln drum edge to each wall. The smooth corner image factor is:
+     $$m\_{\text{eff}} = (1 + w\_{\text{left}})(1 + w\_{\text{back}}) \in [1, 4]$$
+3. **Plume Flow, Capture Radius & Makeup-Air Fan Throttling:**
    - 95% Gaussian plume radius at hood mouth: $r\_{\text{plume,95}} = 1.65 (0.12 \Delta z\_{\text{plume}}) + d\_{\text{offset}}$.
-   - Volumetric plume flow rate:
-     $$\dot{V}\_{\text{plume}} = \frac{\dot{m}\_{\text{plume}}}{\rho\_{\text{plume}}}, \quad \dot{m}\_{\text{plume}} = 0.071 (\dot{Q}\_{\text{plume,kW}} m\_{\text{eff}})^{1/3} \Delta z\_{\text{plume}}^{5/3} m\_{\text{eff}}^{-1/3} + 0.018 \dot{Q}\_{\text{plume,kW}}^{1/3} D\_{\text{kiln}}$$
+   - Mowrer-Williamson corner-modified plume entrainment rate:
+     $$\dot{V}\_{\text{plume}} = \frac{\dot{m}\_{\text{plume}}}{\rho\_{\text{plume}}}, \quad \dot{m}\_{\text{plume}} = 0.071 \dot{Q}\_{\text{plume,kW}}^{1/3} \Delta z\_{\text{plume}}^{5/3} m\_{\text{eff}}^{-2/3} + 0.018 \dot{Q}\_{\text{plume,kW}}^{1/3} D\_{\text{kiln}}$$
+   - Effective exhaust fan volumetric flow $\dot{V}\_{\text{fan,eff}}$ accounts for room makeup-air starvation when the doorway gap $W\_{\text{door\_open}}$ narrows, balancing fan curve static head ($\Delta P\_{\text{fan,max}} = 250\ \text{Pa}$) against orifice resistance through the ajar doorway plus background room infiltration area ($A\_{\text{infil}} = 0.005\ \text{m}^2$).
 4. **Hood Capture Fraction ($\eta\_{\text{plume}}$) and Full Capture Flag:**
-   - Geometric overlap fraction: $\eta\_{\text{geom}} = 1.0$ if $R\_{\text{hood}} \ge r\_{\text{plume,95}}$, else $1 - \exp(-0.5 (R\_{\text{hood}}/\sigma\_r)^2)$.
-   - Volumetric capacity fraction: $\eta\_{\text{vol}} = \min(1.0, \dot{V}\_{\text{fan}} / \dot{V}\_{\text{plume}})$.
+   - Radial Gaussian capture overlap with effective hood capture reach $R\_{\text{cap}} = \max(0, R\_{\text{hood}} - d\_{\text{offset}})$ and plume spread $\sigma\_r = 0.12 \Delta z\_{\text{plume}} / \sqrt{2}$:
+     $$\eta\_{\text{geom}} = \frac{1 - \exp\!\left(-\frac{1}{2}(R\_{\text{cap}}/\sigma\_r)^2\right)}{1 - \exp\!\left(-\frac{1}{2}(1.65\sqrt{2})^2\right)} \quad (\text{clamped to } 1.0 \text{ when } R\_{\text{hood}} \ge r\_{\text{plume,95}})$$
+   - Volumetric capacity fraction: $\eta\_{\text{vol}} = \min(1.0, \dot{V}\_{\text{fan,eff}} / \dot{V}\_{\text{plume}})$.
    - Combined capture fraction: $\eta\_{\text{plume}} = \eta\_{\text{geom}} \eta\_{\text{vol}}$.
    - Full capture boolean flag:
-     $$\text{plume\_fully\_captured} = \left( \dot{V}\_{\text{fan}} \ge \dot{V}\_{\text{plume}} \right) \land \left( R\_{\text{hood}} \ge r\_{\text{plume,95}} \right)$$
+     $$\text{plume\_fully\_captured} = \left( \dot{V}\_{\text{fan,eff}} \ge \dot{V}\_{\text{plume}} \right) \land \left( R\_{\text{hood}} \ge r\_{\text{plume,95}} \right)$$
 5. **Behind-Shield Chimney Capture Fraction ($\eta\_{\text{chimney}}$):**
-   - Modeled via surplus extraction capacity $\dot{V}\_{\text{surplus}} = \max(0, \dot{V}\_{\text{fan}} - \eta\_{\text{plume}} \dot{V}\_{\text{plume}})$, potential sink velocity $v\_{\text{sink}}$, and chimney vertical exit jet momentum.
+   - Modeled via surplus extraction capacity $\dot{V}\_{\text{surplus}} = \max(0, \dot{V}\_{\text{fan,eff}} - \eta\_{\text{plume}} \dot{V}\_{\text{plume}})$, potential sink velocity $v\_{\text{sink}}$, and chimney vertical exit jet momentum.
 
 ### 4.6 Two-Zone Room Enclosure, Stratification & Ajar Doorway Balance
 
-Convective heat from uncaptured plume $(1 - \eta\_{\text{plume}})\dot{Q}\_{\text{plume}}$, uncaptured chimney $(1 - \eta\_{\text{chimney}})\dot{Q}\_{\text{chimney}}$, and front wall surfaces heats the two-zone room enclosure:
+The two-zone room energy balance conserves total studio enthalpy across uncaptured plume $(1 - \eta\_{\text{plume}})\dot{Q}\_{\text{plume}}$, uncaptured chimney $(1 - \eta\_{\text{chimney}})\dot{Q}\_{\text{chimney}}$, non-plume front-face convection (`GYPSUM_*`, `SHIELD_*`, `REFLECTOR_TOP`, `SSR_BOX`), far-field room radiation $\dot{Q}\_{\text{rad,room}}$, uncaptured SSR louver heat $\dot{Q}\_{\text{SSR,louver}}$, and under-reflector gap convection $\dot{Q}\_{\text{under\_ref}}$:
 1. **Stratification Interface Height ($z\_{\text{layer}}$):** Determined from doorway buoyancy neutral plane and spill rate $\dot{m}\_{\text{spill}}$.
 2. **Doorway Buoyancy Exchange:**
    $$\dot{m}\_{\text{door}} = \frac{1}{2} \rho\_\infty W\_{\text{door\_open}} (H\_{\text{door}} - z\_{\text{layer}}) \cdot 0.65 \sqrt{g (H\_{\text{door}} - z\_{\text{layer}}) \frac{T\_{\text{upper}} - T\_{\text{ext}}}{T\_{\text{ext}}}}$$
 3. **Coupled Zone Temperatures ($T\_{\text{room,upper}}, T\_{\text{room,lower}}$):**
-   - Solved simultaneously by balancing heat inputs against envelope conductances $(UA)\_{\text{upper}}$, $(UA)\_{\text{lower}}$, and airflow advection through the doorway and hood fan.
-4. **Ceiling Point Temperature Verification:**
-   - Evaluates point sensors at the canopy hood outer rim (`ceiling_hood_rim_corner`, `ceiling_hood_rim_room`) and directly above the chimney exit (`ceiling_chimney_corner`), including uncaptured chimney jet mixing ($35\%$ local temperature elevation).
+   - Solved simultaneously via exact $2\times 2$ energy closure balancing zone heat inputs against envelope conductances $(UA)\_{\text{upper}}$, $(UA)\_{\text{lower}}$ and airflow advection through the doorway, infiltration, and effective hood fan extraction $\dot{V}\_{\text{fan,eff}}$.
+4. **Ceiling & Bare-AAC Gap Point Temperature Verification:**
+   - Evaluates downward-facing ceiling sensors (`ceiling_hood_rim_corner`, `ceiling_hood_rim_room`, `ceiling_chimney_corner`) using stability-aware horizontal convection correlations ($h\_c \propto |\Delta T|^{0.20}$ when heated above a cooler air layer), adding local ceiling mixing from both uncaptured primary plume spill ($25\%$) and uncaptured chimney jet ($35\%$).
+   - Evaluates bare corner AAC block exposed in any non-zero `g_floor` or `g_ceil` strip at $\Delta z\_{\text{wall}}$-subdivided heights (`aac_gap_floor_*`, `aac_gap_ceil_*`) including shield ray occlusion and vertical natural convection, feeding the peak `t_aac_max_c` metric.
 
 ### 4.7 SSR Enclosure Lumped Thermal Model
 
@@ -326,33 +329,35 @@ The louvered SSR enclosure at $\theta\_{\text{SSR}} = -45^\circ$ exchanges radia
    |      - Kiln Cylinder (on-skin cylindrical centroids), Lid, and Base disks
    |      - Floor Reflector disk
    |      - SSR Enclosure (rear and side vertical faces)
-   |      - Floor sensors (pad edge, radial penumbra array, vinyl edges) and ceiling sensors
+   |      - Floor sensors (pad edge, radial penumbra array, vinyl edges), ceiling sensors, and bare-AAC gap sensors
 
 [Stage 2: Pre-Compute Geometry & View Factors]
-   |-- Compute patch-to-patch diffuse view factor matrix F_direct with ray-traced cylinder occlusion
+   |-- Compute patch-to-patch diffuse view factor matrix F_direct with solid kiln/hood/reflector ray occlusion & polar disk quadrature
    |-- Compute exact coaxial parallel disks view factor for kiln bottom to reflector
    |-- Add specular reflector mirror-image matrix F_mirror (z_mirror) -> effective matrix F_eff
-   |-- Compute sensor view factor vectors dF_{sensor -> n}
-   |-- Pre-factor LU decomposition of radiosity matrix [I - (1 - eps) * F_eff]
+   |-- Compute sensor view factor vectors dF_{sensor -> n} (with shield occlusion on bare-AAC sensors)
+   |-- Pre-factor LU decomposition of radiosity matrix [I - diag(rho_d) * F_eff]
 
 [Stage 3 & 4: Coupled Thermal-Fluid Convergence Loop]
-   |-- Initialize T_room_lower = T_ext, T_room_upper = T_ext + 2.0 K
-   |-- OUTER LOOP (Room Stratification, Plume State & Ambient Air, max passes until delta_T < 0.05 K):
+   |-- Initialize T_room_lower = T_ext, T_room_upper = T_ext (or warm-start from initial_solution)
+   |-- OUTER LOOP (max 25 iters until max_res < 0.5 W/m^2, dt_room < 0.005 K, dz_layer < 0.002 m):
    |     |
-   |     |-- INNER VECTORIZED NEWTON SOLVER (Surface Energy Balance):
-   |     |     1. Solve linear radiosity system via LU back-substitution for J and q_rad_net
+   |     |-- INNER VECTORIZED NEWTON SOLVER (max 60 iters until max_res < 1e-4 W/m^2):
+   |     |     1. Solve linear radiosity system via LU back-substitution for J, G, and q_rad_net = eps (sigma T^4 - G)
    |     |     2. Solve 1D behind-shield chimney flow, vertical air heating T_ch(z), and AAC conduction
    |     |     3. Evaluate Churchill-Chu and disk natural convection coefficients h_c(T)
    |     |     4. Compute exact analytical local derivatives dR_m / dT_m
-   |     |     5. Execute damped Newton step on surface temperatures until max residual < 0.05 W/m^2
+   |     |     5. Execute damped Newton step on surface temperatures until max residual < 1e-4 W/m^2
    |     |
    |     |-- Solve SSR internal air (T_ssr_air) and casing (T_ssr_case) temperatures
-   |     |-- Solve corner-modified plume flow, hood capture fractions, doorway exchange, and room temps
-   |     |-- Check outer loop convergence |T_upper_new - T_upper_old| < 0.05 K
+   |     |-- Solve corner-modified plume flow, fan throttling, hood capture, doorway exchange, and room temps
+   |     |-- Check outer loop convergence (dt_room < 0.005 K and dz_layer < 0.002 m)
+   |-- FINAL SYNCHRONIZED POLISH:
+   |     |-- Synchronize undamped (T_upper, T_lower, z_layer) to room_sol, polish inner Newton to < 1e-4 W/m^2, and re-solve room once (twice if shift > 1e-4)
 
 [Stage 5: Post-Processing & Safety Metrics]
-   |-- Solve floor sensor point temperatures (pad edge, outside VIP, vinyl edge)
-   |-- Solve ceiling sensor point temperatures (hood rim, chimney exit)
+   |-- Solve floor sensor point temperatures (pad under/edge, outside VIP, vinyl edge)
+   |-- Solve ceiling sensor (stability-aware convection + plume/chimney spill) & bare-AAC gap sensor temperatures
    |-- Extract peak metrics, evaluate safety flags, and assemble SimulationOutput protobuf
 ```
 
