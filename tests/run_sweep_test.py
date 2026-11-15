@@ -452,7 +452,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
       self.assertAlmostEqual(
           grouped_out.metrics.t_ceiling_max_c,
           standalone_out.metrics.t_ceiling_max_c,
-          delta=0.05,
+          places=2,
       )
 
 

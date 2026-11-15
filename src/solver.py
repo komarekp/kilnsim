@@ -592,8 +592,10 @@ def solve_thermal_system(
   converged = False
   max_res = 1e9
   dt_room_change = 0.0
+  dz_layer_change = 0.0
 
-  for outer_iter in range(constants.SOLVER_MAX_OUTER_ITERS):
+  def _run_inner_newton() -> None:
+    nonlocal t_front_k, max_res
     for inner_iter in range(constants.SOLVER_MAX_INNER_ITERS):
       do_chimney = (inner_iter < 12) or (inner_iter % 2 == 0) or (max_res < 5.0)
       res_vec, jac_diag = _evaluate_step(t_front_k, update_chimney=do_chimney)
@@ -613,7 +615,8 @@ def solve_thermal_system(
     res_vec, _ = _evaluate_step(t_front_k, update_chimney=True)
     max_res = float(np.max(np.abs(res_vec)))
 
-    room_sol = plume_room_lib.solve_plume_and_room(
+  def _solve_room() -> plume_room_lib.RoomSolution:
+    return plume_room_lib.solve_plume_and_room(
         mesh=mesh,
         t_front_k=t_front_k,
         q_conv_front_w_m2=latest_state["q_conv_out"],
@@ -625,36 +628,69 @@ def solve_thermal_system(
         q_under_ref_conv_w=latest_state["q_under_ref_conv_w"],
     )
 
+  for outer_iter in range(constants.SOLVER_MAX_OUTER_ITERS):
+    _run_inner_newton()
+    room_sol = _solve_room()
+
     dt_room_change = max(
         abs(room_sol.t_room_upper_k - t_room_upper_k),
         abs(room_sol.t_room_lower_k - t_room_lower_k),
     )
+    dz_layer_change = abs(room_sol.z_stratification_layer_m - z_layer_m)
     t_room_upper_k = 0.7 * room_sol.t_room_upper_k + 0.3 * t_room_upper_k
     t_room_lower_k = 0.7 * room_sol.t_room_lower_k + 0.3 * t_room_lower_k
     z_layer_m = room_sol.z_stratification_layer_m
 
     logging.info(
         "Outer iter %d: max_res=%.3e W/m^2, T_upper=%.2f C, T_lower=%.2f C, "
-        "dt_room=%.3f K",
+        "dt_room=%.3f K, dz_layer=%.4f m",
         outer_iter + 1,
         max_res,
         t_room_upper_k - params_lib.KELVIN_OFFSET,
         t_room_lower_k - params_lib.KELVIN_OFFSET,
         dt_room_change,
+        dz_layer_change,
     )
     if (
         max_res < constants.SOLVER_OUTER_RES_TOL_W_M2
         and dt_room_change < constants.SOLVER_OUTER_TEMP_TOL_K
+        and dz_layer_change < constants.SOLVER_OUTER_LAYER_TOL_M
         and (
             outer_iter >= 1
-            or dt_room_change < constants.SOLVER_OUTER_FAST_TEMP_TOL_K
+            or (
+                dt_room_change < constants.SOLVER_OUTER_FAST_TEMP_TOL_K
+                and dz_layer_change < 0.5 * constants.SOLVER_OUTER_LAYER_TOL_M
+            )
         )
     ):
       converged = True
       break
 
-  wall_time_s = time.monotonic() - t_start
   assert room_sol is not None
+  # Final patch polish synchronized directly to the undamped room solution.
+  t_room_upper_k = room_sol.t_room_upper_k
+  t_room_lower_k = room_sol.t_room_lower_k
+  z_layer_m = room_sol.z_stratification_layer_m
+  _run_inner_newton()
+  room_sol = _solve_room()
+  post_shift = max(
+      abs(room_sol.t_room_upper_k - t_room_upper_k),
+      abs(room_sol.t_room_lower_k - t_room_lower_k),
+      abs(room_sol.z_stratification_layer_m - z_layer_m),
+  )
+  if post_shift > 1e-4:
+    t_room_upper_k = room_sol.t_room_upper_k
+    t_room_lower_k = room_sol.t_room_lower_k
+    z_layer_m = room_sol.z_stratification_layer_m
+    _run_inner_newton()
+    room_sol = _solve_room()
+  t_room_upper_k = room_sol.t_room_upper_k
+  t_room_lower_k = room_sol.t_room_lower_k
+  z_layer_m = room_sol.z_stratification_layer_m
+  res_vec, _ = _evaluate_step(t_front_k, update_chimney=True)
+  max_res = float(np.max(np.abs(res_vec)))
+
+  wall_time_s = time.monotonic() - t_start
 
   return SolverSolution(
       t_front_k=latest_state["t_front_k"],

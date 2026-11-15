@@ -795,6 +795,83 @@ class SolverAndMetricsTest(absltest.TestCase):
     self.assertGreater(met_ceil_gap.t_aac_max_c, met_base.t_aac_max_c + 5.0)
     self.assertGreater(met_floor_gap.t_aac_max_c, met_base.t_aac_max_c + 5.0)
 
+  def test_warm_start_matches_cold_start_and_satisfies_final_patch_residual(
+      self,
+  ) -> None:
+    """Warm start matches cold start and final patches satisfy final room state."""
+    cfg_seed = copy.deepcopy(self.base_pb)
+    cfg_seed.geometry.room.w_door_open_mm = 0.0
+    cfg_seed.thermal.sources.exhaust_fan_cfm = 0.0
+    p_seed = params_lib.from_proto(cfg_seed)
+    m_seed = mesh_lib.build_mesh(p_seed)
+    vf_seed = vf_lib.compute_view_factors(m_seed, p_seed)
+    sol_seed = solver_lib.solve_thermal_system(m_seed, vf_seed, p_seed)
+
+    # Check final patch-to-room consistency at sol_seed.room.
+    lu_seed = solver_lib.factor_radiosity_matrix(m_seed, vf_seed)
+    t_amb_seed = np.where(
+        m_seed.centroids[:, 2] >= sol_seed.room.z_stratification_layer_m,
+        sol_seed.room.t_room_upper_k,
+        sol_seed.room.t_room_lower_k,
+    )
+    _, q_rad_check = solver_lib.solve_radiosity_system(
+        t_front_k=sol_seed.t_front_k,
+        t_amb_rad_k=t_amb_seed,
+        lu_piv=lu_seed,
+        mesh=m_seed,
+        vf_sys=vf_seed,
+    )
+    stypes = m_seed.surface_types
+    char_lengths = np.full(m_seed.num_patches, p_seed.h_wall, dtype=np.float64)
+    char_lengths[stypes == int(mesh_lib.SurfaceType.KILN_SIDE)] = (
+        p_seed.h_kiln_total
+    )
+    char_lengths[
+        (stypes == int(mesh_lib.SurfaceType.KILN_LID))
+        | (stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+    ] = (0.5 * p_seed.r_kiln)
+    char_lengths[stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)] = max(
+        0.05, 0.5 * p_seed.r_reflector
+    )
+    char_lengths[
+        (stypes == int(mesh_lib.SurfaceType.SHIELD_LEFT))
+        | (stypes == int(mesh_lib.SurfaceType.SHIELD_BACK))
+    ] = p_seed.h_shield
+    char_lengths[stypes == int(mesh_lib.SurfaceType.SSR_BOX)] = p_seed.h_ssr
+    h_check = solver_lib.compute_natural_convection_h(
+        t_surf_k=sol_seed.t_front_k,
+        t_amb_k=t_amb_seed,
+        char_lengths_m=char_lengths,
+        surface_types=stypes,
+    )
+    q_conv_check = h_check * (sol_seed.t_front_k - t_amb_seed)
+    final_res_max = float(
+        np.max(np.abs(q_rad_check + q_conv_check - sol_seed.q_cond_net_w_m2))
+    )
+    self.assertLess(final_res_max, 1e-2)
+
+    p_base = params_lib.from_proto(self.base_pb)
+    m_base = mesh_lib.build_mesh(p_base)
+    vf_base = vf_lib.compute_view_factors(m_base, p_base)
+    sol_cold = solver_lib.solve_thermal_system(m_base, vf_base, p_base)
+    sol_warm = solver_lib.solve_thermal_system(
+        m_base, vf_base, p_base, initial_solution=sol_seed
+    )
+
+    self.assertLess(
+        float(np.max(np.abs(sol_warm.t_front_k - sol_cold.t_front_k))), 0.01
+    )
+    self.assertLess(
+        abs(sol_warm.room.t_room_upper_k - sol_cold.room.t_room_upper_k), 0.01
+    )
+    self.assertLess(
+        abs(
+            sol_warm.room.z_stratification_layer_m
+            - sol_cold.room.z_stratification_layer_m
+        ),
+        0.002,
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

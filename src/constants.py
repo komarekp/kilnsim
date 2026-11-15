@@ -121,13 +121,13 @@ VINYL_FLOOR_EMISSIVITY: float = 0.90
 # ---------------------------------------------------------------------------
 # Coupled steady-state solver numerical parameters
 # ---------------------------------------------------------------------------
-SOLVER_MAX_OUTER_ITERS: int = 20
+SOLVER_MAX_OUTER_ITERS: int = 25
 SOLVER_MAX_INNER_ITERS: int = 60
 SOLVER_INNER_RES_TOL_W_M2: float = 1.0e-4
 SOLVER_OUTER_RES_TOL_W_M2: float = 0.5
-SOLVER_OUTER_TEMP_TOL_K: float = 0.05
-SOLVER_OUTER_FAST_TEMP_TOL_K: float = 0.005
-SOLVER_OUTER_LAYER_TOL_M: float = 0.005
+SOLVER_OUTER_TEMP_TOL_K: float = 0.005
+SOLVER_OUTER_FAST_TEMP_TOL_K: float = 0.001
+SOLVER_OUTER_LAYER_TOL_M: float = 0.002
 SOLVER_MIN_TEMP_K: float = 250.0
 SOLVER_MAX_STEP_K: float = 25.0
 
