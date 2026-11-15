@@ -67,7 +67,7 @@ geometry {
 
   hood {
     d_hood_inlet_mm: 800.0
-    d_hood_duct_mm: 150.0
+    d_hood_duct_mm: 200.0
     z_hood_drop_mm: 400.0
     # Centered directly over the kiln axis:
     # 25 mm (chimney) + 20 mm (shield) + 205 mm (standoff) + 350 mm (radius) = 600 mm.

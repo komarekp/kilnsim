@@ -150,7 +150,7 @@ The studio subfloor below $z = 0$ consists of a 150 mm structural concrete slab,
 |:--------------------------|:-----------------|:------------|:------|:---------------------------------------------------------------------------------------------------|
 | $\dot{V}\_{\text{fan}}$ \newline `exhaust_fan_cfm` | 350.0 | 0.0 to 1000.0 | CFM | Active volumetric flow rate of overhead exhaust blower ($1\ \text{CFM} = 4.719 \times 10^{-4}\ \text{m}^3/\text{s}$). |
 | $D\_{\text{hood}}$ \newline `d_hood_inlet_mm` | 800.0 | 500.0 to 1200.0 | mm | Bottom capture opening diameter of canopy hood. |
-| $D\_{\text{duct}}$ \newline `d_hood_duct_mm` | 150.0 | 100.0 to 250.0 | mm | Exhaust duct throat diameter exiting top of hood. |
+| $D\_{\text{duct}}$ \newline `d_hood_duct_mm` | 200.0 | 100.0 to 250.0 | mm | Exhaust duct throat diameter exiting top of hood. |
 | $z\_{\text{hood\_drop}}$ \newline `z_hood_drop_mm` | 400.0 | 100.0 to 1000.0 | mm | Distance from ceiling down to hood inlet rim ($z\_{\text{hood,inlet}} = H\_{\text{wall}} - z\_{\text{hood\_drop}}$). |
 | $x\_{\text{hood}}, y\_{\text{hood}}$ \newline `x_hood_mm, y_hood_mm` | 600.0, 600.0 | $> 0.0$ | mm | Planar coordinates of vertical hood centerline axis (centered above kiln axis). |
 | $L\_{\text{room}}, W\_{\text{room}}$ \newline `l_room_mm, w_room_mm` | 3530.0, 2770.0 | $> 0.0$ | mm | Interior studio dimensions along +x (Left Wall) and +y (Back Wall). |

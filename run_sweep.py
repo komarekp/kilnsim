@@ -344,7 +344,7 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
       + 0.5 * cfg.geometry.kiln.d_kiln_mm
   )
   cfg.geometry.hood.d_hood_inlet_mm = point.d_hood_inlet_mm
-  cfg.geometry.hood.d_hood_duct_mm = 150.0
+  cfg.geometry.hood.d_hood_duct_mm = 200.0
   cfg.geometry.hood.z_hood_drop_mm = point.z_hood_drop_mm
   cfg.geometry.hood.x_hood_mm = x_kiln_center_mm
   cfg.geometry.hood.y_hood_mm = y_kiln_center_mm
