@@ -35,7 +35,6 @@ R_SI_WALL: float = 0.13  # m^2 * K / W interior wall film resistance
 R_SE_WALL: float = 0.04  # m^2 * K / W exterior wall film resistance
 H_CONV_MIN_W_M2K: float = 2.0  # W / (m^2 * K) natural convection floor clamp
 H_CONV_UNDER_REFLECTOR_W_M2K: float = 3.0  # W / (m^2 * K) under elevated reflector
-H_CONV_REFLECTOR_AIR_W_M2K: float = 3.5  # W / (m^2 * K) open reflector disk conv
 H_CONV_SSR_INTERNAL_W_M2K: float = 5.5  # W / (m^2 * K) internal SSR housing wall
 H_CONV_CEILING_JET_MIN_W_M2K: float = 2.0  # W / (m^2 * K) downward-facing floor
 

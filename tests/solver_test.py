@@ -493,6 +493,77 @@ class SolverAndMetricsTest(absltest.TestCase):
         metrics_old.t_vip_outside_reflector_c,
     )
 
+  def test_bare_stainless_reflector_uses_reflector_emissivity_on_underside(
+      self,
+  ) -> None:
+    """Bare stainless reflector underside has low emissivity (eps_reflector_top)."""
+    cfg_bare = copy.deepcopy(self.base_pb)
+    cfg_bare.grid.dx_wall_mm = 200.0
+    cfg_bare.grid.dz_wall_mm = 200.0
+    cfg_bare.grid.n_theta_kiln = 8
+    cfg_bare.grid.n_z_kiln = 3
+    cfg_bare.geometry.floor.d_reflector_mm = 800.0
+    cfg_bare.geometry.floor.w_floor_pad_mm = 1200.0
+    cfg_bare.geometry.floor.g_floor_reflector_mm = 20.0
+    cfg_bare.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg_bare.thermal.sources.u_kiln_bot = 15.0
+    cfg_bare.thermal.emissivities.eps_kiln_bot = 0.90
+    cfg_bare.thermal.emissivities.eps_reflector_top = 0.15
+    cfg_bare.thermal.emissivities.eps_shield = 0.90
+
+    cfg_high_eps = copy.deepcopy(cfg_bare)
+    # 0.5 mm layer triggers CalSil underside (eps_shield=0.90) with negligible R.
+    cfg_high_eps.geometry.floor.t_reflector_calsil_mm = 0.5
+
+    p_bare = params_lib.from_proto(cfg_bare)
+    m_bare = mesh_lib.build_mesh(p_bare)
+    vf_bare = vf_lib.compute_view_factors(m_bare, p_bare)
+    sol_bare = solver_lib.solve_thermal_system(m_bare, vf_bare, p_bare)
+    met_bare = metrics_lib.compute_safety_metrics(m_bare, vf_bare, sol_bare, p_bare)
+
+    p_high = params_lib.from_proto(cfg_high_eps)
+    m_high = mesh_lib.build_mesh(p_high)
+    vf_high = vf_lib.compute_view_factors(m_high, p_high)
+    sol_high = solver_lib.solve_thermal_system(m_high, vf_high, p_high)
+    met_high = metrics_lib.compute_safety_metrics(m_high, vf_high, sol_high, p_high)
+
+    self.assertLess(
+        met_bare.t_floor_pad_under_reflector_c + 10.0,
+        met_high.t_floor_pad_under_reflector_c,
+    )
+
+  def test_flush_reflector_conducts_to_subfloor_ext_sink(self) -> None:
+    """When g_floor_reflector == 0, reflector conducts directly to t_ext_k."""
+    cfg = copy.deepcopy(self.base_pb)
+    cfg.grid.dx_wall_mm = 200.0
+    cfg.grid.dz_wall_mm = 200.0
+    cfg.grid.n_theta_kiln = 8
+    cfg.grid.n_z_kiln = 3
+    cfg.geometry.floor.g_floor_reflector_mm = 0.0
+    cfg.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg.geometry.floor.d_reflector_mm = 700.0
+    cfg.geometry.floor.w_floor_pad_mm = 1200.0
+    cfg.geometry.room.w_door_open_mm = 0.0
+    cfg.thermal.sources.exhaust_fan_cfm = 0.0
+    cfg.thermal.sources.t_ext_c = 10.0
+    cfg.thermal.sources.u_kiln_bot = 0.01
+
+    params = params_lib.from_proto(cfg)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+    sol = solver_lib.solve_thermal_system(mesh, vf_sys, params)
+
+    ref_mask = mesh.surface_types == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
+    r_sub = (
+        params.t_floor_pad / params.k_pad
+        + params.t_screed / params.k_screed
+        + params.t_vip / params.k_vip
+    )
+    u_sub = 1.0 / r_sub
+    expected_q_down = u_sub * (float(sol.t_front_k[ref_mask][0]) - params.t_ext_k)
+    actual_q_down = -float(sol.q_cond_net_w_m2[ref_mask][0])
+    self.assertAlmostEqual(actual_q_down, expected_q_down, delta=1e-2)
+
 
 if __name__ == "__main__":
   absltest.main()

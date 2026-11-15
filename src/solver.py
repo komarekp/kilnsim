@@ -155,7 +155,19 @@ def _solve_ssr_internal_air(
   t_ssr_case_k = float(np.sum(t_ssr_faces_k * ssr_areas) / np.sum(ssr_areas))
 
   a_ref = math.pi * (params.r_reflector ** 2)
-  h_ref = constants.H_CONV_REFLECTOR_AIR_W_M2K
+  if params.r_reflector > 0.0:
+    h_ref = float(
+        compute_natural_convection_h(
+            t_surf_k=np.array([t_ref_k], dtype=np.float64),
+            t_amb_k=np.array([t_lower_k], dtype=np.float64),
+            char_lengths_m=np.array([params.d_reflector], dtype=np.float64),
+            surface_types=np.array(
+                [int(mesh_lib.SurfaceType.REFLECTOR_TOP)], dtype=np.int32
+            ),
+        )[0]
+    )
+  else:
+    h_ref = 0.0
   q_ref_conv = max(0.0, h_ref * a_ref * (t_ref_k - t_lower_k))
   m_dot_local_inflow = constants.SSR_LOCAL_INFLOW_KG_S
   dt_floor_conv = q_ref_conv / (m_dot_local_inflow * constants.AIR_CP)
@@ -185,6 +197,111 @@ def _solve_ssr_internal_air(
     t_air_k = 0.5 * t_air_k + 0.5 * t_air_new
 
   return t_air_k, t_ssr_case_k
+
+
+def solve_under_reflector_column(
+    t_ref_front_k: float,
+    t_room_lower_k: float,
+    params: params_lib.SimParams,
+) -> tuple[float, float, float, float]:
+  """Solves 1D steady heat transfer from reflector front face through subfloor.
+
+  Accounts for optional CalSil backing conduction, bare stainless vs. CalSil
+  underside emissivity across the elevated gap, under-reflector convection to
+  `t_room_lower_k`, and subfloor conduction (pad + screed + VIP) to `t_ext_k`.
+
+  Args:
+    t_ref_front_k: Reflector top surface temperature (K).
+    t_room_lower_k: Lower-zone room air temperature (K).
+    params: Validated SimParams instance.
+
+  Returns:
+    Tuple `(q_down_w_m2, du_down_w_m2k, t_ref_back_k, t_pad_center_k)` where
+    `q_down_w_m2` is net heat flux leaving the reflector downward (W/m^2),
+    `du_down_w_m2k` is its local linearization `dq_down / dT_ref_front`,
+    `t_ref_back_k` is the reflector underside temperature (K), and
+    `t_pad_center_k` is the floor pad / screed top temperature directly beneath
+    the reflector center (K).
+  """
+  r_pad = (
+      params.t_floor_pad / max(params.k_pad, 0.1)
+      if params.t_floor_pad > 0.0
+      else 0.0
+  )
+  r_sub = (
+      r_pad
+      + (params.t_screed / params.k_screed)
+      + (params.t_vip / params.k_vip)
+  )
+  u_sub = 1.0 / r_sub
+  has_calsil = params.t_reflector_calsil > constants.GEOM_TOL_M
+  r_calsil = (params.t_reflector_calsil / params.k_shield) if has_calsil else 0.0
+
+  if params.g_floor_reflector <= constants.GEOM_TOL_M:
+    u_total = 1.0 / (r_calsil + r_sub)
+    q_down = u_total * (t_ref_front_k - params.t_ext_k)
+    t_ref_back_k = t_ref_front_k - q_down * r_calsil
+    return q_down, u_total, t_ref_back_k, t_ref_back_k
+
+  eps_underside = (
+      params.eps_shield if has_calsil else params.eps_reflector_top
+  )
+  eps_gap = 1.0 / (
+      (1.0 / eps_underside) + (1.0 / constants.FLOOR_PAD_EMISSIVITY) - 1.0
+  )
+  h_under = constants.H_CONV_UNDER_REFLECTOR_W_M2K
+  sigma = constants.STEFAN_BOLTZMANN
+
+  t_rb = float(t_ref_front_k)
+  t_p = 0.5 * (t_rb + t_room_lower_k)
+  g_calsil = (1.0 / r_calsil) if has_calsil else 0.0
+
+  for _ in range(10):
+    f_pad = (
+        eps_gap * sigma * ((t_rb ** 4) - (t_p ** 4))
+        - h_under * (t_p - t_room_lower_k)
+        - u_sub * (t_p - params.t_ext_k)
+    )
+    h_rad_b = 4.0 * eps_gap * sigma * (t_rb ** 3)
+    h_rad_p = 4.0 * eps_gap * sigma * (t_p ** 3)
+    df_pad_dtp = -(h_rad_p + h_under + u_sub)
+
+    if has_calsil:
+      f_rb = (
+          g_calsil * (t_ref_front_k - t_rb)
+          - eps_gap * sigma * ((t_rb ** 4) - (t_p ** 4))
+          - h_under * (t_rb - t_room_lower_k)
+      )
+      df_rb_dtrb = -(g_calsil + h_rad_b + h_under)
+      df_rb_dtp = h_rad_p
+      df_pad_dtrb = h_rad_b
+      det = df_rb_dtrb * df_pad_dtp - df_rb_dtp * df_pad_dtrb
+      dt_rb = (-f_rb * df_pad_dtp + f_pad * df_rb_dtp) / det
+      dt_p = (-df_rb_dtrb * f_pad + df_pad_dtrb * f_rb) / det
+      t_rb = max(constants.SOLVER_MIN_TEMP_K, t_rb + dt_rb)
+      t_p = max(constants.SOLVER_MIN_TEMP_K, t_p + dt_p)
+      if max(abs(dt_rb), abs(dt_p)) < 1e-8:
+        break
+    else:
+      dt_p = -f_pad / df_pad_dtp
+      t_p = max(constants.SOLVER_MIN_TEMP_K, t_p + dt_p)
+      if abs(dt_p) < 1e-8:
+        break
+
+  q_rad_gap = eps_gap * sigma * ((t_rb ** 4) - (t_p ** 4))
+  q_down = q_rad_gap + h_under * (t_rb - t_room_lower_k)
+
+  h_rad_b = 4.0 * eps_gap * sigma * (t_rb ** 3)
+  h_rad_p = 4.0 * eps_gap * sigma * (t_p ** 3)
+  g_gap_eff = h_under + h_rad_b * (h_under + u_sub) / (
+      h_rad_p + h_under + u_sub
+  )
+  du_down = (
+      (g_calsil * g_gap_eff) / (g_calsil + g_gap_eff)
+      if has_calsil
+      else g_gap_eff
+  )
+  return float(q_down), float(du_down), float(t_rb), float(t_p)
 
 
 def factor_radiosity_matrix(
@@ -267,19 +384,6 @@ def solve_thermal_system(
       + (params.t_aac / params.k_aac)
       + params_lib.R_SE_WALL
   )
-  if params.g_floor_reflector > constants.GEOM_TOL_M:
-    u_ref_down = 1.0 / (
-        (params.t_reflector_calsil / params.k_shield)
-        + (1.0 / constants.H_CONV_REFLECTOR_AIR_W_M2K)
-    )
-  else:
-    u_ref_down = 1.0 / (
-        (params.t_reflector_calsil / params.k_shield)
-        + (params.t_floor_pad / max(params.k_pad, 0.1))
-        + (params.t_screed / params.k_screed)
-        + (params.t_vip / params.k_vip)
-    )
-
   g_shield = params.k_shield / params.t_shield
 
   u_cond_diag = np.zeros(n_patches, dtype=np.float64)
@@ -287,7 +391,6 @@ def solve_thermal_system(
   u_cond_diag[kiln_lid_mask] = params.u_kiln_top
   u_cond_diag[kiln_bot_mask] = params.u_kiln_bot
   u_cond_diag[gypsum_mask] = u_gypsum_wall
-  u_cond_diag[ref_mask] = u_ref_down
   u_cond_diag[ssr_mask] = constants.H_CONV_SSR_INTERNAL_W_M2K
 
   dt_firing = max(0.0, params.t_internal_k - params.t_ext_k)
@@ -409,10 +512,15 @@ def solve_thermal_system(
     t_back_k[gypsum_mask] = t_safe[gypsum_mask] + (
         q_cond_in[gypsum_mask] * (params.t_gypsum / params.k_gypsum)
     )
-    q_cond_in[ref_mask] = -u_ref_down * (t_safe[ref_mask] - t_room_lower_k)
-    t_back_k[ref_mask] = t_safe[ref_mask] + (
-        q_cond_in[ref_mask] * (params.t_reflector_calsil / params.k_shield)
-    )
+    if np.any(ref_mask):
+      q_ref_down, du_ref_down, t_ref_back_k, _ = solve_under_reflector_column(
+          t_ref_front_k=t_ref_val,
+          t_room_lower_k=t_room_lower_k,
+          params=params,
+      )
+      u_cond_diag[ref_mask] = du_ref_down
+      q_cond_in[ref_mask] = -q_ref_down
+      t_back_k[ref_mask] = t_ref_back_k
     q_cond_in[ssr_mask] = (
         constants.H_CONV_SSR_INTERNAL_W_M2K * (t_ssr_air_k - t_safe[ssr_mask])
     )

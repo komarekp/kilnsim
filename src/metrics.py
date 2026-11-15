@@ -154,24 +154,12 @@ def compute_safety_metrics(
         t_amb_k=solution.room.t_room_lower_k,
         t_ext_k=params.t_ext_k,
     )
-  elif params.g_floor_reflector > 1e-4:
-    t_ref_back_k = float(solution.t_back_k[ref_mask][0])
-    eps_gap = 1.0 / (
-        (1.0 / params.eps_shield) + (1.0 / FLOOR_PAD_EMISSIVITY) - 1.0
-    )
-    h_rad_under = (
-        4.0
-        * eps_gap
-        * params_lib.STEFAN_BOLTZMANN
-        * ((0.5 * (t_ref_back_k + solution.room.t_room_lower_k)) ** 3)
-    )
-    t_pad_center_k = (
-        h_rad_under * t_ref_back_k
-        + H_CONV_UNDER_REFLECTOR_W_M2K * solution.room.t_room_lower_k
-        + u_pad_subfloor * params.t_ext_k
-    ) / (h_rad_under + H_CONV_UNDER_REFLECTOR_W_M2K + u_pad_subfloor)
   else:
-    t_pad_center_k = float(solution.t_back_k[ref_mask][0])
+    _, _, _, t_pad_center_k = solver_lib.solve_under_reflector_column(
+        t_ref_front_k=float(solution.t_front_k[ref_mask][0]),
+        t_room_lower_k=solution.room.t_room_lower_k,
+        params=params,
+    )
 
   t_floor_pad_under_reflector_c = t_pad_center_k - params_lib.KELVIN_OFFSET
   t_vip_under_ref_k = params.t_ext_k + (
