@@ -604,6 +604,32 @@ class ViewFactorsTest(absltest.TestCase):
         float(np.sum(vf_sys.f_eff[ssr_ids[2], kiln_side_mask])), 0.02
     )
 
+  def test_ceiling_sensor_grid_captures_unshadowed_lid_view_outside_dropped_hood(
+      self,
+  ) -> None:
+    """Dropped hood shadows the rim sensor from KILN_LID, while ceiling grid sees it outside shadow."""
+    cfg = copy.deepcopy(self.base_pb)
+    cfg.geometry.hood.d_hood_inlet_mm = 800.0
+    cfg.geometry.hood.z_hood_drop_mm = 500.0
+    params = params_lib.from_proto(cfg)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+
+    lid_id = int(
+        np.flatnonzero(mesh.surface_types == int(mesh_lib.SurfaceType.KILN_LID))[
+            0
+        ]
+    )
+    self.assertLess(
+        float(vf_sys.sensor_vf["ceiling_hood_rim_room"][lid_id]), 1e-4
+    )
+    ceiling_lid_vfs = [
+        float(vec[lid_id])
+        for name, vec in vf_sys.sensor_vf.items()
+        if name.startswith("ceiling_")
+    ]
+    self.assertGreater(max(ceiling_lid_vfs), 0.02)
+
 
 if __name__ == "__main__":
   absltest.main()

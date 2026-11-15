@@ -165,6 +165,49 @@ def _solve_floor_sensor_temp_k(
   )
 
 
+def _solve_ceiling_sensors_vec_k(
+    vf_mat: np.ndarray,
+    radiosity_w_m2: np.ndarray,
+    eps_ceil: float,
+    u_roof: float,
+    t_amb_vec_k: np.ndarray,
+    t_ext_k: float,
+) -> np.ndarray:
+  """Solves downward-facing ceiling sensor balances vectorized across a grid."""
+  f_room = np.maximum(0.0, 1.0 - np.sum(vf_mat, axis=1))
+  sigma = constants.STEFAN_BOLTZMANN
+  g_incident = (vf_mat @ radiosity_w_m2) + f_room * sigma * (t_amb_vec_k ** 4)
+  q_abs = eps_ceil * g_incident
+  t_k = np.maximum(t_amb_vec_k, t_ext_k) + 2.0
+
+  for _ in range(12):
+    dt = t_k - t_amb_vec_k
+    abs_dt = np.maximum(np.abs(dt), 1e-12)
+    is_unstable = dt < 0.0
+    h_unstable = np.maximum(
+        constants.H_CONV_MIN_W_M2K,
+        constants.H_CONV_HORIZ_UNSTABLE_COEFF * (abs_dt ** 0.25),
+    )
+    h_stable = np.maximum(
+        constants.H_CONV_STABLE_MIN_W_M2K,
+        constants.H_CONV_HORIZ_STABLE_COEFF * (abs_dt ** 0.20),
+    )
+    h_c = np.where(is_unstable, h_unstable, h_stable)
+    dh_slope = np.where(is_unstable, 1.25, 1.20)
+    res = (
+        q_abs
+        - eps_ceil * sigma * (t_k ** 4)
+        - h_c * dt
+        - u_roof * (t_k - t_ext_k)
+    )
+    jac = 4.0 * eps_ceil * sigma * (t_k ** 3) + dh_slope * h_c + u_roof
+    step = np.clip(res / np.maximum(jac, 1e-6), -25.0, 25.0)
+    t_k = np.maximum(constants.SOLVER_MIN_TEMP_K, t_k + step)
+    if float(np.max(np.abs(res))) < 1e-6:
+      break
+  return t_k
+
+
 def _solve_ceiling_sensor_temp_k(
     vf_vec: np.ndarray,
     radiosity_w_m2: np.ndarray,
@@ -359,49 +402,71 @@ def compute_safety_metrics(
   )
   t_chimney_exit_max_c = t_chimney_exit_max_k - params_lib.KELVIN_OFFSET
 
-  # 6. Ceiling peak surface temperature at z = h_wall
+  # 6. Ceiling peak surface temperature across z = h_wall
   uncaptured_chimney_frac = 1.0 - solution.room.chimney_capture_fraction
-  t_amb_ceil_chimney_k = (
-      solution.room.t_room_upper_k
-      + CHIMNEY_CEILING_MIXING_FRACTION
-      * uncaptured_chimney_frac
-      * max(0.0, t_chimney_exit_max_k - solution.room.t_room_upper_k)
-  )
+  dt_chim_excess = max(0.0, t_chimney_exit_max_k - solution.room.t_room_upper_k)
   uncaptured_plume_frac = 1.0 - solution.room.plume_capture_fraction
-  t_amb_ceil_hood_k = (
-      solution.room.t_room_upper_k
-      + constants.PLUME_CEILING_MIXING_FRACTION
-      * uncaptured_plume_frac
-      * max(0.0, solution.room.t_plume_at_hood_k - solution.room.t_room_upper_k)
+  dt_plume_excess = max(
+      0.0, solution.room.t_plume_at_hood_k - solution.room.t_room_upper_k
   )
-  t_ceil_hood_corner_k = _solve_ceiling_sensor_temp_k(
-      vf_vec=vf_sys.sensor_vf["ceiling_hood_rim_corner"],
-      radiosity_w_m2=solution.radiosity_w_m2,
-      eps_ceil=params.eps_gypsum,
-      u_roof=params.u_roof,
-      t_amb_k=t_amb_ceil_hood_k,
-      t_ext_k=params.t_ext_k,
+  r_0_plume = max(
+      0.15, params.r_hood_inlet + constants.CEILING_SENSOR_RIM_OFFSET_M
   )
-  t_ceil_hood_room_k = _solve_ceiling_sensor_temp_k(
-      vf_vec=vf_sys.sensor_vf["ceiling_hood_rim_room"],
-      radiosity_w_m2=solution.radiosity_w_m2,
-      eps_ceil=params.eps_gypsum,
-      u_roof=params.u_roof,
-      t_amb_k=t_amb_ceil_hood_k,
-      t_ext_k=params.t_ext_k,
-  )
-  t_ceil_chimney_k = _solve_ceiling_sensor_temp_k(
-      vf_vec=vf_sys.sensor_vf["ceiling_chimney_corner"],
-      radiosity_w_m2=solution.radiosity_w_m2,
-      eps_ceil=params.eps_gypsum,
-      u_roof=params.u_roof,
-      t_amb_k=t_amb_ceil_chimney_k,
-      t_ext_k=params.t_ext_k,
-  )
-  t_ceiling_max_c = (
-      max(t_ceil_hood_corner_k, t_ceil_hood_room_k, t_ceil_chimney_k)
-      - params_lib.KELVIN_OFFSET
-  )
+
+  ceil_vfs: list[np.ndarray] = []
+  ceil_ambs_k: list[float] = []
+  for name, (coord, _) in vf_lib.ceiling_sensor_points(params).items():
+    if name not in vf_sys.sensor_vf:
+      continue
+    xc, yc, _ = coord
+    r_h = math.hypot(xc - params.x_hood, yc - params.y_hood)
+    if r_h < params.r_hood_inlet:
+      f_plume_r = math.exp(
+          -(params.r_hood_inlet - r_h) / constants.CEILING_PLUME_INNER_DECAY_M
+      )
+    else:
+      f_plume_r = (max(r_h, r_0_plume) / r_0_plume) ** (-2.0 / 3.0)
+    dt_plume_jet = (
+        constants.PLUME_CEILING_MIXING_FRACTION
+        * uncaptured_plume_frac
+        * dt_plume_excess
+        * f_plume_r
+    )
+
+    d_left = math.hypot(
+        max(0.0, xc - params.x_shield_left_end),
+        max(0.0, yc - params.y_shield_front_left_wall),
+    )
+    d_back = math.hypot(
+        max(0.0, xc - params.x_shield_front_back_wall),
+        max(0.0, yc - params.y_shield_back_end),
+    )
+    d_chim = max(
+        0.0, min(d_left, d_back) - constants.CEILING_SENSOR_WALL_OFFSET_M
+    )
+    dt_chim_jet = (
+        CHIMNEY_CEILING_MIXING_FRACTION
+        * uncaptured_chimney_frac
+        * dt_chim_excess
+        * math.exp(-d_chim / constants.CEILING_CHIMNEY_JET_DECAY_M)
+    )
+    ceil_vfs.append(vf_sys.sensor_vf[name])
+    ceil_ambs_k.append(
+        solution.room.t_room_upper_k + max(dt_plume_jet, dt_chim_jet)
+    )
+
+  if ceil_vfs:
+    ceil_temps_k = _solve_ceiling_sensors_vec_k(
+        vf_mat=np.vstack(ceil_vfs),
+        radiosity_w_m2=solution.radiosity_w_m2,
+        eps_ceil=params.eps_gypsum,
+        u_roof=params.u_roof,
+        t_amb_vec_k=np.array(ceil_ambs_k, dtype=np.float64),
+        t_ext_k=params.t_ext_k,
+    )
+    t_ceiling_max_c = float(np.max(ceil_temps_k)) - params_lib.KELVIN_OFFSET
+  else:
+    t_ceiling_max_c = solution.room.t_room_upper_k - params_lib.KELVIN_OFFSET
   ceiling_safe = t_ceiling_max_c < LIMIT_CEILING_C
 
   # 6b. Exhaust duct mixed air temperature (including teed bung exhaust)

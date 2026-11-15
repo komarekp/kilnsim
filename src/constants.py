@@ -74,6 +74,10 @@ NUM_SSR_FACES: int = 3  # Rear + 2 side exposed faces on SSR_BOX
 FLOOR_SENSOR_EDGE_OFFSET_M: float = 0.005
 CEILING_SENSOR_RIM_OFFSET_M: float = 0.010
 CEILING_SENSOR_WALL_OFFSET_M: float = 0.050
+CEILING_NUM_AZIMUTHS: int = 8
+CEILING_GRID_MAX_RADIUS_M: float = 1.80
+CEILING_PLUME_INNER_DECAY_M: float = 0.15
+CEILING_CHIMNEY_JET_DECAY_M: float = 0.25
 GEOM_TOL_M: float = 1.0e-4
 
 # ---------------------------------------------------------------------------

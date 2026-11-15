@@ -1460,15 +1460,14 @@ def _compute_upper_point_sensor_vfs(
   return sensor_vf_map
 
 
-def compute_ceiling_sensor_vfs(
-    mesh: mesh_lib.SurfaceMesh,
+def ceiling_sensor_points(
     params: params_lib.SimParams,
-) -> dict[str, np.ndarray]:
-  """Computes the downward-facing ceiling sensor view factor vectors at z = h_wall."""
+) -> dict[str, tuple[tuple[float, float, float], np.ndarray]]:
+  """Returns coordinates and downward normals for legacy and grid ceiling sensors."""
   diag_inv = 1.0 / math.sqrt(2.0)
   r_ceil_sensor = params.r_hood_inlet + CEILING_SENSOR_RIM_OFFSET_M
   pt_n_ceil = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-  point_specs = {
+  point_specs: dict[str, tuple[tuple[float, float, float], np.ndarray]] = {
       "ceiling_hood_rim_corner": (
           (
               max(
@@ -1500,10 +1499,114 @@ def compute_ceiling_sensor_vfs(
           pt_n_ceil,
       ),
   }
+
+  r_cutout = (
+      params.r_hood_inlet
+      if params.z_hood_drop <= constants.GEOM_TOL_M
+      else 0.5 * params.d_hood_duct
+  )
+  r_min_ceil = r_cutout + CEILING_SENSOR_RIM_OFFSET_M
+
+  raw_radii = [
+      r_min_ceil,
+      r_ceil_sensor,
+      0.25,
+      0.40,
+      0.55,
+      0.70,
+      0.85,
+      1.05,
+      1.30,
+      1.55,
+      constants.CEILING_GRID_MAX_RADIUS_M,
+  ]
+  if (
+      params.z_hood_drop > constants.GEOM_TOL_M
+      and params.z_hood_inlet > params.z_kiln_top + 0.05
+  ):
+    scale_umb = (params.h_wall - params.z_kiln_top) / (
+        params.z_hood_inlet - params.z_kiln_top
+    )
+    r_umbra = params.r_hood_inlet * scale_umb
+    r_penumbra = (params.r_hood_inlet + params.r_kiln) * scale_umb - params.r_kiln
+    raw_radii.extend([
+        r_umbra + 0.02,
+        0.5 * (r_umbra + r_penumbra),
+        r_penumbra + 0.02,
+        r_penumbra + 0.15,
+    ])
+
+  grid_radii: list[float] = []
+  for r_val in sorted(r for r in raw_radii if r >= r_min_ceil - 1e-6):
+    if not grid_radii or abs(r_val - grid_radii[-1]) >= 0.020:
+      grid_radii.append(r_val)
+
+  def _in_ceiling_bounds(x_val: float, y_val: float) -> bool:
+    x_low = (
+        params.x_shield_front_back_wall + CEILING_SENSOR_WALL_OFFSET_M
+        if y_val <= params.y_shield_back_end + constants.GEOM_TOL_M
+        else CEILING_SENSOR_WALL_OFFSET_M
+    )
+    y_low = (
+        params.y_shield_front_left_wall + CEILING_SENSOR_WALL_OFFSET_M
+        if x_val <= params.x_shield_left_end + constants.GEOM_TOL_M
+        else CEILING_SENSOR_WALL_OFFSET_M
+    )
+    return (
+        x_low - 1e-6 <= x_val <= params.l_room - CEILING_SENSOR_WALL_OFFSET_M + 1e-6
+        and y_low - 1e-6 <= y_val <= params.w_room - CEILING_SENSOR_WALL_OFFSET_M + 1e-6
+    )
+
+  for r_idx, r_val in enumerate(grid_radii):
+    for a_idx in range(constants.CEILING_NUM_AZIMUTHS):
+      theta = (2.0 * math.pi * a_idx) / constants.CEILING_NUM_AZIMUTHS
+      xc = params.x_hood + r_val * math.cos(theta)
+      yc = params.y_hood + r_val * math.sin(theta)
+      if _in_ceiling_bounds(xc, yc):
+        point_specs[f"ceiling_grid_r{r_idx}_a{a_idx}"] = (
+            (xc, yc, params.h_wall),
+            pt_n_ceil,
+        )
+
+  # Strip along left and back shield top chimney exits outside hood penetration.
+  y_left_strip = params.y_shield_front_left_wall + CEILING_SENSOR_WALL_OFFSET_M
+  x_left_min = max(
+      params.x_shield_front_back_wall + CEILING_SENSOR_WALL_OFFSET_M, 0.10
+  )
+  if params.x_shield_left_end > x_left_min + 0.05:
+    for k, frac in enumerate((0.20, 0.50, 0.85)):
+      xc = x_left_min + frac * (params.x_shield_left_end - x_left_min)
+      if math.hypot(xc - params.x_hood, y_left_strip - params.y_hood) >= r_min_ceil:
+        point_specs[f"ceiling_chimney_left_{k}"] = (
+            (xc, y_left_strip, params.h_wall),
+            pt_n_ceil,
+        )
+
+  x_back_strip = params.x_shield_front_back_wall + CEILING_SENSOR_WALL_OFFSET_M
+  y_back_min = max(
+      params.y_shield_front_left_wall + CEILING_SENSOR_WALL_OFFSET_M, 0.10
+  )
+  if params.y_shield_back_end > y_back_min + 0.05:
+    for k, frac in enumerate((0.20, 0.50, 0.85)):
+      yc = y_back_min + frac * (params.y_shield_back_end - y_back_min)
+      if math.hypot(x_back_strip - params.x_hood, yc - params.y_hood) >= r_min_ceil:
+        point_specs[f"ceiling_chimney_back_{k}"] = (
+            (x_back_strip, yc, params.h_wall),
+            pt_n_ceil,
+        )
+
+  return point_specs
+
+
+def compute_ceiling_sensor_vfs(
+    mesh: mesh_lib.SurfaceMesh,
+    params: params_lib.SimParams,
+) -> dict[str, np.ndarray]:
+  """Computes downward-facing ceiling sensor view factor vectors at z = h_wall."""
   return _compute_upper_point_sensor_vfs(
       mesh=mesh,
       params=params,
-      point_specs=point_specs,
+      point_specs=ceiling_sensor_points(params),
       check_shields=False,
   )
 
@@ -1577,7 +1680,9 @@ def update_ceiling_sensor_vfs(
 ) -> ViewFactorSystem:
   """Returns a ViewFactorSystem with updated ceiling and bare-AAC sensor VFs."""
   new_sensor_vf = {
-      k: v for k, v in vf_sys.sensor_vf.items() if not k.startswith("aac_gap_")
+      k: v
+      for k, v in vf_sys.sensor_vf.items()
+      if not k.startswith("aac_gap_") and not k.startswith("ceiling_")
   }
   new_sensor_vf.update(compute_ceiling_sensor_vfs(mesh=mesh, params=params))
   new_sensor_vf.update(compute_bare_aac_sensor_vfs(mesh=mesh, params=params))

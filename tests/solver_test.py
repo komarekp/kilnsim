@@ -922,6 +922,49 @@ class SolverAndMetricsTest(absltest.TestCase):
         delta=0.05,
     )
 
+  def test_ceiling_max_temp_captures_radiative_peak_outside_hood_shadow(
+      self,
+  ) -> None:
+    """t_ceiling_max_c finds peak heating outside the dropped hood's thermal shadow."""
+    cfg = copy.deepcopy(self.base_pb)
+    cfg.grid.dx_wall_mm = 200.0
+    cfg.grid.dz_wall_mm = 200.0
+    cfg.grid.n_theta_kiln = 8
+    cfg.grid.n_z_kiln = 3
+    cfg.geometry.room.chimney.d_chimney_mm = 0.0
+    cfg.geometry.room.w_door_open_mm = 1500.0
+    cfg.geometry.bung.bung_captured = True
+    cfg.geometry.hood.d_hood_inlet_mm = 800.0
+    cfg.geometry.hood.z_hood_drop_mm = 550.0
+    cfg.thermal.sources.u_kiln_top = 5.0
+    cfg.thermal.sources.exhaust_fan_cfm = 1500.0
+    params = params_lib.from_proto(cfg)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+    sol = solver_lib.solve_thermal_system(mesh, vf_sys, params)
+    metrics = metrics_lib.compute_safety_metrics(mesh, vf_sys, sol, params)
+
+    legacy_names = (
+        "ceiling_hood_rim_corner",
+        "ceiling_hood_rim_room",
+        "ceiling_chimney_corner",
+    )
+    t_legacy_max_c = (
+        max(
+            metrics_lib._solve_ceiling_sensor_temp_k(
+                vf_vec=vf_sys.sensor_vf[name],
+                radiosity_w_m2=sol.radiosity_w_m2,
+                eps_ceil=params.eps_gypsum,
+                u_roof=params.u_roof,
+                t_amb_k=sol.room.t_room_upper_k,
+                t_ext_k=params.t_ext_k,
+            )
+            for name in legacy_names
+        )
+        - constants.KELVIN_OFFSET
+    )
+    self.assertGreater(metrics.t_ceiling_max_c, t_legacy_max_c + 2.0)
+
 
 if __name__ == "__main__":
   absltest.main()
