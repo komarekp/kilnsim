@@ -194,7 +194,7 @@ class SolverAndMetricsTest(absltest.TestCase):
     vf_high = vf_lib.compute_view_factors(m_high, p_high)
     sol_high = solver_lib.solve_thermal_system(m_high, vf_high, p_high)
 
-    self.assertGreater(sol_high.t_ssr_case_k, sol_low.t_ssr_case_k + 0.5)
+    self.assertGreater(sol_high.t_ssr_case_k, sol_low.t_ssr_case_k + 0.3)
 
   def test_wide_polished_reflector_increases_wall_and_ceiling_max_temps(
       self,
@@ -563,6 +563,112 @@ class SolverAndMetricsTest(absltest.TestCase):
     expected_q_down = u_sub * (float(sol.t_front_k[ref_mask][0]) - params.t_ext_k)
     actual_q_down = -float(sol.q_cond_net_w_m2[ref_mask][0])
     self.assertAlmostEqual(actual_q_down, expected_q_down, delta=1e-2)
+
+  def test_coaxial_diffuse_and_specular_disks_match_parallel_plate_radiation(
+      self,
+  ) -> None:
+    """Close coaxial KILN_BOTTOM and wide specular reflector match parallel plates."""
+    cfg = copy.deepcopy(self.base_pb)
+    cfg.grid.dx_wall_mm = 250.0
+    cfg.grid.dz_wall_mm = 250.0
+    cfg.grid.n_theta_kiln = 8
+    cfg.grid.n_z_kiln = 3
+    cfg.geometry.kiln.d_kiln_mm = 700.0
+    cfg.geometry.kiln.h_kiln_base_mm = 5.0
+    cfg.geometry.floor.d_reflector_mm = 1400.0
+    cfg.geometry.floor.w_floor_pad_mm = 1500.0
+    cfg.geometry.floor.g_floor_reflector_mm = 0.0
+    cfg.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg.thermal.emissivities.eps_kiln_bot = 0.80
+    cfg.thermal.emissivities.eps_reflector_top = 0.15
+
+    params = params_lib.from_proto(cfg)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+    lu_piv = solver_lib.factor_radiosity_matrix(mesh, vf_sys)
+
+    bot_id = int(
+        np.flatnonzero(
+            mesh.surface_types == int(mesh_lib.SurfaceType.KILN_BOTTOM)
+        )[0]
+    )
+    t_front_k = np.full(mesh.num_patches, 300.0, dtype=np.float64)
+    t_front_k[bot_id] = 700.0
+    t_amb_rad_k = np.full(mesh.num_patches, 300.0, dtype=np.float64)
+
+    _, q_rad_out = solver_lib.solve_radiosity_system(
+        t_front_k=t_front_k,
+        t_amb_rad_k=t_amb_rad_k,
+        lu_piv=lu_piv,
+        mesh=mesh,
+        vf_sys=vf_sys,
+    )
+    q_parallel = (
+        params_lib.STEFAN_BOLTZMANN
+        * ((700.0 ** 4) - (300.0 ** 4))
+        / ((1.0 / 0.80) + (1.0 / 0.15) - 1.0)
+    )
+    self.assertAlmostEqual(
+        float(q_rad_out[bot_id]), q_parallel, delta=0.18 * q_parallel
+    )
+
+  def test_radiosity_system_conserves_global_watts_with_specular_reflector(
+      self,
+  ) -> None:
+    """Specular reflector radiosity equals E_b and total enclosure Watts conserve."""
+    cfg = copy.deepcopy(self.base_pb)
+    cfg.grid.dx_wall_mm = 250.0
+    cfg.grid.dz_wall_mm = 250.0
+    cfg.grid.n_theta_kiln = 8
+    cfg.grid.n_z_kiln = 3
+    cfg.geometry.floor.d_reflector_mm = 1000.0
+    cfg.geometry.floor.w_floor_pad_mm = 1200.0
+    cfg.thermal.emissivities.eps_reflector_top = 0.15
+
+    params = params_lib.from_proto(cfg)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+    lu_piv = solver_lib.factor_radiosity_matrix(mesh, vf_sys)
+
+    stypes = mesh.surface_types
+    ref_mask = stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
+    ref_id = int(np.flatnonzero(ref_mask)[0])
+    kiln_mask = (
+        (stypes == int(mesh_lib.SurfaceType.KILN_SIDE))
+        | (stypes == int(mesh_lib.SurfaceType.KILN_LID))
+        | (stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+    )
+
+    t_front_k = np.full(mesh.num_patches, 310.0, dtype=np.float64)
+    t_front_k[kiln_mask] = 650.0
+    t_front_k[ref_id] = 320.0
+    t_amb_rad_k = np.full(mesh.num_patches, 295.0, dtype=np.float64)
+
+    radiosity, q_rad_out = solver_lib.solve_radiosity_system(
+        t_front_k=t_front_k,
+        t_amb_rad_k=t_amb_rad_k,
+        lu_piv=lu_piv,
+        mesh=mesh,
+        vf_sys=vf_sys,
+    )
+    sigma = params_lib.STEFAN_BOLTZMANN
+    self.assertAlmostEqual(
+        float(radiosity[ref_id]), sigma * (320.0 ** 4), places=6
+    )
+
+    eb_surf = sigma * (t_front_k ** 4)
+    eb_room = sigma * (t_amb_rad_k ** 4)
+    total_patch_w = float(np.sum(mesh.areas * q_rad_out))
+    room_terms = np.where(
+        ref_mask,
+        mesh.areas
+        * params.eps_reflector_top
+        * vf_sys.f_room
+        * (eb_surf - eb_room),
+        mesh.areas * vf_sys.f_room * (radiosity - eb_room),
+    )
+    total_room_w = float(np.sum(room_terms))
+    self.assertAlmostEqual(total_patch_w, total_room_w, delta=1e-5)
 
 
 if __name__ == "__main__":

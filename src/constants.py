@@ -79,7 +79,7 @@ KILN_DISK_QUAD_R: int = 16
 KILN_DISK_QUAD_THETA: int = 48
 SSR_QUAD_U: int = 6
 SSR_QUAD_V: int = 6
-MAX_PATCH_VF_ROW_SUM: float = 0.995
+MAX_PATCH_VF_ROW_SUM: float = 1.0
 MAX_SENSOR_VF_SUM: float = 0.99
 
 # ---------------------------------------------------------------------------

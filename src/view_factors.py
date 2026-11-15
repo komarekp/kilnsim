@@ -493,6 +493,20 @@ def compute_view_factors(
       out=np.zeros_like(af_matrix),
       where=areas[:, None] > 0.0,
   )
+  dir_row_sums = np.sum(f_direct, axis=1)
+  if np.any(dir_row_sums > constants.MAX_PATCH_VF_ROW_SUM):
+    s_dir = np.where(
+        dir_row_sums > constants.MAX_PATCH_VF_ROW_SUM,
+        constants.MAX_PATCH_VF_ROW_SUM / np.maximum(dir_row_sums, 1e-12),
+        1.0,
+    )
+    af_matrix *= np.minimum(s_dir[:, None], s_dir[None, :])
+    f_direct = np.divide(
+        af_matrix,
+        areas[:, None],
+        out=np.zeros_like(af_matrix),
+        where=areas[:, None] > 0.0,
+    )
 
   # 4. Specular reflection from the circular floor reflector (REFLECTOR_TOP)
   # for both the finite KILN_BOTTOM disk and KILN_SIDE patches onto walls
@@ -504,12 +518,11 @@ def compute_view_factors(
         & (stypes != int(mesh_lib.SurfaceType.REFLECTOR_TOP))
         & (stypes != int(mesh_lib.SurfaceType.KILN_BOTTOM))
         & (stypes != int(mesh_lib.SurfaceType.KILN_LID))
-        & (stypes != int(mesh_lib.SurfaceType.KILN_SIDE))
     )
     target_ids = np.flatnonzero(target_mask)
 
     # 4a. Specular reflection of the finite KILN_BOTTOM disk (at z = z_mirror)
-    if bot_ids.size == 1 and target_ids.size > 0:
+    if bot_ids.size == 1:
       b_id = int(bot_ids[0])
       k_idx = np.arange(_KILN_DISK_QUAD_R, dtype=np.float64) + 0.5
       r_vals = params.r_kiln * np.sqrt(k_idx / _KILN_DISK_QUAD_R)
@@ -530,95 +543,130 @@ def compute_view_factors(
           np.full(n_sub_b, params.z_mirror, dtype=np.float64),
       ])
 
-      c_t = c[target_ids]
-      n_t = n_vec[target_ids]
-      a_t = areas[target_ids]
-      st_t = stypes[target_ids]
+      # Specular self-return F_{KILN_BOTTOM -> KILN_BOTTOM | reflector}.
+      dz_bot_ref = params.z_drum_bot - params.z_reflector_top
+      if dz_bot_ref > 1e-6:
+        if params.r_reflector >= params.r_kiln - 1e-6:
+          vf_bb_mirror = coaxial_parallel_disks_vf(
+              r1=params.r_kiln,
+              r2=params.r_kiln,
+              h=2.0 * dz_bot_ref,
+          )
+        else:
+          src_x_1d = params.x_kiln_center + r_vals
+          src_y_1d = np.full(
+              _KILN_DISK_QUAD_R, params.y_kiln_center, dtype=np.float64
+          )
+          dx_bb = img_coords_b[None, :, 0] - src_x_1d[:, None]
+          dy_bb = img_coords_b[None, :, 1] - src_y_1d[:, None]
+          dz_bb = 2.0 * dz_bot_ref
+          d_sq_bb = dx_bb * dx_bb + dy_bb * dy_bb + dz_bb * dz_bb
+          cos_bb = dz_bb / np.sqrt(np.maximum(d_sq_bb, 1e-12))
+          x_mid_bb = 0.5 * (src_x_1d[:, None] + img_coords_b[None, :, 0])
+          y_mid_bb = 0.5 * (src_y_1d[:, None] + img_coords_b[None, :, 1])
+          r_mid_bb = np.hypot(
+              x_mid_bb - params.x_kiln_center,
+              y_mid_bb - params.y_kiln_center,
+          )
+          hit_bb = r_mid_bb <= params.r_reflector + 1e-4
+          vf_ring = np.sum(
+              np.where(
+                  hit_bb,
+                  (cos_bb * cos_bb * d_area_b) / (math.pi * d_sq_bb + d_area_b),
+                  0.0,
+              ),
+              axis=1,
+          )
+          vf_bb_mirror = float(np.mean(vf_ring))
+        if ref_ids.size == 1:
+          vf_bb_mirror = min(vf_bb_mirror, float(f_direct[b_id, int(ref_ids[0])]))
+        f_mirror[b_id, b_id] += params.rho_reflector_top * vf_bb_mirror
 
-      # Vector from target patch m to virtual image sub-element q: (M_t, N_sub, 3)
-      r_t_to_b = img_coords_b[None, :, :] - c_t[:, None, :]
-      d_sq_tb = np.sum(r_t_to_b * r_t_to_b, axis=2)
-      d_tb = np.sqrt(np.maximum(d_sq_tb, 1e-12))
+      if target_ids.size > 0:
+        c_t = c[target_ids]
+        n_t = n_vec[target_ids]
+        a_t = areas[target_ids]
+        st_t = stypes[target_ids]
 
-      cos_t = np.sum(r_t_to_b * n_t[:, None, :], axis=2) / d_tb
-      cos_img_b = -r_t_to_b[:, :, 2] / d_tb
+        # Vector from target patch m to virtual image sub-element q: (M_t, N_sub, 3)
+        r_t_to_b = img_coords_b[None, :, :] - c_t[:, None, :]
+        d_sq_tb = np.sum(r_t_to_b * r_t_to_b, axis=2)
+        d_tb = np.sqrt(np.maximum(d_sq_tb, 1e-12))
 
-      dz_tb = c_t[:, 2] - params.z_mirror
-      t_hit_b = (c_t[:, 2] - params.z_reflector_top) / np.maximum(dz_tb, 1e-6)
-      x_hit_b = c_t[:, 0, None] + t_hit_b[:, None] * (
-          img_coords_b[None, :, 0] - c_t[:, 0, None]
-      )
-      y_hit_b = c_t[:, 1, None] + t_hit_b[:, None] * (
-          img_coords_b[None, :, 1] - c_t[:, 1, None]
-      )
-      r_hit_b = np.hypot(
-          x_hit_b - params.x_kiln_center,
-          y_hit_b - params.y_kiln_center,
-      )
+        cos_t = np.sum(r_t_to_b * n_t[:, None, :], axis=2) / d_tb
+        cos_img_b = -r_t_to_b[:, :, 2] / d_tb
 
-      hit_b = (
-          (cos_t > 1e-6)
-          & (cos_img_b > 1e-6)
-          & (r_hit_b <= params.r_reflector + 1e-4)
-      )
-      # SSR_BOX sits outside the kiln footprint and only sees reflections off
-      # the overhanging annulus (r_hit >= r_kiln).
-      ssr_target_rows = st_t == int(mesh_lib.SurfaceType.SSR_BOX)
-      if np.any(ssr_target_rows):
-        hit_b[ssr_target_rows, :] &= (
-            r_hit_b[ssr_target_rows, :] >= params.r_kiln - 1e-4
+        dz_tb = c_t[:, 2] - params.z_mirror
+        t_hit_b = (c_t[:, 2] - params.z_reflector_top) / np.maximum(
+            dz_tb, 1e-6
+        )
+        x_hit_b = c_t[:, 0, None] + t_hit_b[:, None] * (
+            img_coords_b[None, :, 0] - c_t[:, 0, None]
+        )
+        y_hit_b = c_t[:, 1, None] + t_hit_b[:, None] * (
+            img_coords_b[None, :, 1] - c_t[:, 1, None]
+        )
+        r_hit_b = np.hypot(
+            x_hit_b - params.x_kiln_center,
+            y_hit_b - params.y_kiln_center,
         )
 
-      # Block any reflected ray that bounces on the far side of the kiln and
-      # would have to pass through the solid kiln drum to reach the target patch.
-      hit_m_idx, hit_q_idx = np.nonzero(hit_b)
-      if hit_m_idx.size > 0:
-        p1_hits = np.column_stack([
-            x_hit_b[hit_m_idx, hit_q_idx],
-            y_hit_b[hit_m_idx, hit_q_idx],
-            np.full(hit_m_idx.size, params.z_reflector_top, dtype=np.float64),
-        ])
-        p2_targets = c_t[hit_m_idx]
-        # Check kiln-cylinder occlusion for bounces outside the kiln footprint
-        # or on the opposite side of the kiln center from the target patch.
-        dot_side = (
-            (p1_hits[:, 0] - params.x_kiln_center)
-            * (p2_targets[:, 0] - params.x_kiln_center)
-            + (p1_hits[:, 1] - params.y_kiln_center)
-            * (p2_targets[:, 1] - params.y_kiln_center)
+        hit_b = (
+            (cos_t > 1e-6)
+            & (cos_img_b > 1e-6)
+            & (r_hit_b <= params.r_reflector + 1e-4)
         )
-        check_cyl_mask = (
-            r_hit_b[hit_m_idx, hit_q_idx] >= params.r_kiln - 1e-4
-        ) | (dot_side < 0.0)
-        if np.any(check_cyl_mask):
-          chk_indices = np.flatnonzero(check_cyl_mask)
+        # SSR_BOX and KILN_SIDE sit outside the kiln footprint and can only see
+        # reflections off the overhanging annulus (r_hit >= r_kiln).
+        ann_only_rows = (
+            (st_t == int(mesh_lib.SurfaceType.SSR_BOX))
+            | (st_t == int(mesh_lib.SurfaceType.KILN_SIDE))
+        )
+        if np.any(ann_only_rows):
+          hit_b[ann_only_rows, :] &= (
+              r_hit_b[ann_only_rows, :] >= params.r_kiln - 1e-4
+          )
+
+        # Block any reflected ray whose path from the reflector hit point to the
+        # target patch intersects the solid kiln drum (including near-side rays
+        # that rise into the underside of KILN_BOTTOM before clearing r_kiln).
+        hit_m_idx, hit_q_idx = np.nonzero(hit_b)
+        if hit_m_idx.size > 0:
+          p1_hits = np.column_stack([
+              x_hit_b[hit_m_idx, hit_q_idx],
+              y_hit_b[hit_m_idx, hit_q_idx],
+              np.full(hit_m_idx.size, params.z_reflector_top, dtype=np.float64),
+          ])
+          p2_targets = c_t[hit_m_idx]
           blocked_b = _is_segment_blocked_by_kiln_cylinder(
-              p1=p1_hits[chk_indices],
-              p2=p2_targets[chk_indices],
+              p1=p1_hits,
+              p2=p2_targets,
               params=params,
           )
-          bad_indices = chk_indices[blocked_b]
-          hit_b[hit_m_idx[bad_indices], hit_q_idx[bad_indices]] = False
+          hit_b[hit_m_idx[blocked_b], hit_q_idx[blocked_b]] = False
 
-      denom_tb = math.pi * d_sq_tb + 0.5 * (a_t[:, None] + d_area_b)
-      vf_tb_sub = np.where(
-          hit_b, cos_t * cos_img_b * d_area_b / denom_tb, 0.0
-      )
-      vf_t_to_b = np.minimum(np.sum(vf_tb_sub, axis=1), 0.35)
+        denom_tb = math.pi * d_sq_tb + 0.5 * (a_t[:, None] + d_area_b)
+        vf_tb_sub = np.where(
+            hit_b, cos_t * cos_img_b * d_area_b / denom_tb, 0.0
+        )
+        vf_t_to_b = np.sum(vf_tb_sub, axis=1)
 
-      f_mirror[target_ids, b_id] += params.rho_reflector_top * vf_t_to_b
-      f_mirror[b_id, target_ids] += (
-          params.rho_reflector_top * vf_t_to_b * a_t / areas[b_id]
-      )
+        f_mirror[target_ids, b_id] += params.rho_reflector_top * vf_t_to_b
+        f_mirror[b_id, target_ids] += (
+            params.rho_reflector_top * vf_t_to_b * a_t / areas[b_id]
+        )
 
     # 4b. Specular reflection of KILN_SIDE patches off the overhanging
     # reflector annulus (r in [r_kiln, r_reflector]) onto walls and SSR_BOX.
     kiln_side_ids = np.flatnonzero(
         stypes == int(mesh_lib.SurfaceType.KILN_SIDE)
     )
+    wall_target_ids = target_ids[
+        stypes[target_ids] != int(mesh_lib.SurfaceType.KILN_SIDE)
+    ]
     if (
         kiln_side_ids.size > 0
-        and target_ids.size > 0
+        and wall_target_ids.size > 0
         and params.r_reflector > params.r_kiln + 1e-4
     ):
       c_ks = c[kiln_side_ids]
@@ -630,9 +678,9 @@ def compute_view_factors(
       n_ks_img = n_ks.copy()
       n_ks_img[:, 2] = -n_ks[:, 2]
 
-      c_t = c[target_ids]
-      n_t = n_vec[target_ids]
-      a_t = areas[target_ids]
+      c_t = c[wall_target_ids]
+      n_t = n_vec[wall_target_ids]
+      a_t = areas[wall_target_ids]
 
       # Vector from target patch m to KILN_SIDE virtual image k: (M_t, N_ks, 3)
       r_t_to_ks = c_ks_img[None, :, :] - c_t[:, None, :]
@@ -687,31 +735,43 @@ def compute_view_factors(
       vf_t_to_ks = np.where(
           hit_ks, cos_t_ks * cos_ks * a_ks[None, :] / denom_tks, 0.0
       )
-      f_mirror[np.ix_(target_ids, kiln_side_ids)] += (
+      f_mirror[np.ix_(wall_target_ids, kiln_side_ids)] += (
           params.rho_reflector_top * vf_t_to_ks
       )
-      f_mirror[np.ix_(kiln_side_ids, target_ids)] += (
+      f_mirror[np.ix_(kiln_side_ids, wall_target_ids)] += (
           params.rho_reflector_top
           * vf_t_to_ks.T
           * (a_t[None, :] / a_ks[:, None])
       )
 
-  # Deduct specularly redirected rays from the direct view factor to
-  # REFLECTOR_TOP (retaining at least the absorbed fraction eps_reflector_top)
-  # so that reflected photons are not double-counted in row sums.
+  # Assemble exact Oppenheim diffuse-specular matrix:
+  # - Mirror surface r_id does not reflect diffusely (J[r_id] = E_b[r_id]), so
+  #   incoming direct rays absorbed by r_id are weighted by eps_reflector_top.
+  # - Symmetric scaling of f_mirror preserves A_m * F_mirror[m,n] = A_n * F_mirror[n,m]
+  #   while ensuring every row sums to <= MAX_PATCH_VF_ROW_SUM.
   if ref_ids.size == 1 and params.r_reflector > 0.0:
     r_id = int(ref_ids[0])
-    mirror_row_sum = np.sum(f_mirror, axis=1)
-    f_direct_to_ref_rem = np.maximum(
-        params.eps_reflector_top * f_direct[:, r_id],
-        f_direct[:, r_id] - mirror_row_sum,
+    direct_sum = np.sum(f_direct, axis=1) - (
+        (1.0 - params.eps_reflector_top) * f_direct[:, r_id]
     )
-    f_direct[:, r_id] = f_direct_to_ref_rem
-    f_direct[r_id, :] = f_direct_to_ref_rem * areas / areas[r_id]
+    avail_m = np.maximum(0.0, constants.MAX_PATCH_VF_ROW_SUM - direct_sum)
+    mir_sum_m = np.sum(f_mirror, axis=1)
+    if np.any(mir_sum_m > avail_m):
+      s_m = np.where(
+          mir_sum_m > avail_m,
+          avail_m / np.maximum(mir_sum_m, 1e-12),
+          1.0,
+      )
+      f_mirror *= np.minimum(s_m[:, None], s_m[None, :])
 
-  f_eff = f_direct + f_mirror
+    f_eff = f_direct + f_mirror
+    f_eff[:, r_id] = params.eps_reflector_top * f_direct[:, r_id]
+    f_eff[r_id, :] = f_direct[r_id, :].copy()
+    f_eff[r_id, r_id] = 0.0
+  else:
+    f_eff = f_direct.copy()
 
-  # 5. Enforce row sum <= MAX_PATCH_VF_ROW_SUM
+  # 5. Enforce row sum <= MAX_PATCH_VF_ROW_SUM (guard against floating-point overshoot)
   row_sums = np.sum(f_eff, axis=1)
   over_mask = row_sums > constants.MAX_PATCH_VF_ROW_SUM
   if np.any(over_mask):
@@ -868,7 +928,6 @@ def compute_ceiling_sensor_vfs(
               )
           )
 
-      vf_ceil_mirror_sum = 0.0
       if params.rho_reflector_top > 0.0:
         # (i) Specular bounce from KILN_SIDE virtual images to ceiling sensor
         if kiln_side_ids_ceil.size > 0:
@@ -933,7 +992,6 @@ def compute_ceiling_sensor_vfs(
               )
               mirror_ks_contrib = params.rho_reflector_top * vf_c_ks
               vf_vec[kiln_side_ids_ceil] += mirror_ks_contrib
-              vf_ceil_mirror_sum += float(np.sum(mirror_ks_contrib))
 
         # (ii) Specular bounce from finite KILN_BOTTOM virtual image disk to ceiling
         if bot_ids.size == 1:
@@ -1002,12 +1060,8 @@ def compute_ceiling_sensor_vfs(
                 )
                 mirror_b_contrib = params.rho_reflector_top * vf_c_b
                 vf_vec[b_id] += mirror_b_contrib
-                vf_ceil_mirror_sum += mirror_b_contrib
 
-      vf_vec[r_id] = max(
-          params.eps_reflector_top * vf_ceil_ref_direct,
-          vf_ceil_ref_direct - vf_ceil_mirror_sum,
-      )
+      vf_vec[r_id] = params.eps_reflector_top * vf_ceil_ref_direct
 
     s_sum = float(np.sum(vf_vec))
     if s_sum > constants.MAX_SENSOR_VF_SUM:

@@ -114,6 +114,12 @@ def compute_natural_convection_h(
   return np.maximum(constants.H_CONV_MIN_W_M2K, h_c)
 
 
+def _diffuse_reflectances(mesh: mesh_lib.SurfaceMesh) -> np.ndarray:
+  """Returns per-patch diffuse reflectances (zero on specular REFLECTOR_TOP)."""
+  is_ref = mesh.surface_types == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
+  return np.where(is_ref, 0.0, 1.0 - mesh.emissivities)
+
+
 def solve_radiosity_system(
     t_front_k: np.ndarray,
     t_amb_rad_k: np.ndarray,
@@ -126,7 +132,7 @@ def solve_radiosity_system(
   Args:
     t_front_k: (N,) surface front temperatures in Kelvin.
     t_amb_rad_k: (N,) effective ambient background radiation temperatures (K).
-    lu_piv: Pre-factored LU decomposition of `I - (1 - eps) * F_eff`.
+    lu_piv: Pre-factored LU decomposition of `I - rho_d * F_eff`.
     mesh: Discretized SurfaceMesh instance.
     vf_sys: Precomputed ViewFactorSystem instance.
 
@@ -135,12 +141,16 @@ def solve_radiosity_system(
     W/m^2 where positive means net radiation leaving the surface).
   """
   eps = mesh.emissivities
+  rho_d = _diffuse_reflectances(mesh)
+  is_ref = mesh.surface_types == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
   eb_surf = params_lib.STEFAN_BOLTZMANN * (t_front_k ** 4)
   eb_room = params_lib.STEFAN_BOLTZMANN * (t_amb_rad_k ** 4)
 
-  rhs = eps * eb_surf + (1.0 - eps) * vf_sys.f_room * eb_room
+  eb_term = np.where(is_ref, eb_surf, eps * eb_surf)
+  rhs = eb_term + rho_d * vf_sys.f_room * eb_room
   radiosity = linalg.lu_solve(lu_piv, rhs)
-  q_rad_out = (eps / np.maximum(1.0 - eps, 1e-6)) * (eb_surf - radiosity)
+  irr = vf_sys.f_eff @ radiosity + vf_sys.f_room * eb_room
+  q_rad_out = eps * (eb_surf - irr)
   return radiosity, q_rad_out
 
 
@@ -308,11 +318,11 @@ def factor_radiosity_matrix(
     mesh: mesh_lib.SurfaceMesh,
     vf_sys: vf_lib.ViewFactorSystem,
 ) -> tuple[np.ndarray, np.ndarray]:
-  """Precomputes the LU factorization of `I - (1 - eps) * F_eff`."""
+  """Precomputes the LU factorization of `I - rho_d * F_eff`."""
   n_patches = mesh.num_patches
-  eps = mesh.emissivities
+  rho_d = _diffuse_reflectances(mesh)
   rad_matrix = np.eye(n_patches, dtype=np.float64) - (
-      (1.0 - eps)[:, None] * vf_sys.f_eff
+      rho_d[:, None] * vf_sys.f_eff
   )
   return linalg.lu_factor(rad_matrix)
 

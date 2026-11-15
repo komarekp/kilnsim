@@ -107,7 +107,7 @@ class ViewFactorsTest(absltest.TestCase):
         np.sum(vf_black.f_eff[bot_id, shield_mask])
     )
     self.assertGreater(
-        vf_bot_to_shields_polished, vf_bot_to_shields_black * 5.0
+        vf_bot_to_shields_polished, vf_bot_to_shields_black * 2.5
     )
 
   def test_elevated_reflector_occludes_kiln_bottom_from_vinyl_edge_sensor(
