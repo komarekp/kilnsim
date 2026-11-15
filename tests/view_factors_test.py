@@ -510,6 +510,100 @@ class ViewFactorsTest(absltest.TestCase):
     vf_got = float(self.vf_sys.f_eff[wall_id, lid_id])
     self.assertAlmostEqual(vf_got, vf_ref, delta=0.05 * vf_ref)
 
+  def test_kiln_cylinder_occludes_corner_wall_to_wall_rays_across_drum(
+      self,
+  ) -> None:
+    """Patches on left and back shields behind opposite sides of kiln drum are occluded."""
+    cfg = copy.deepcopy(self.base_pb)
+    cfg.geometry.shield.w_shield_left_mm = 1500.0
+    cfg.geometry.shield.w_shield_back_mm = 1500.0
+    cfg.geometry.hood.z_hood_drop_mm = 0.0
+    cfg.thermal.emissivities.eps_reflector_top = 0.99
+    params = params_lib.from_proto(cfg)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+
+    stypes = mesh.surface_types
+    c = mesh.centroids
+    z_mid_drum = 0.5 * (params.z_drum_bot + params.z_kiln_top)
+    sl_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.SHIELD_LEFT))
+    sb_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.SHIELD_BACK))
+
+    left_id = int(
+        sl_ids[
+            np.argmin(
+                (c[sl_ids, 0] - (params.x_kiln_center + 0.30)) ** 2
+                + (c[sl_ids, 2] - z_mid_drum) ** 2
+            )
+        ]
+    )
+    back_id = int(
+        sb_ids[
+            np.argmin(
+                (c[sb_ids, 1] - (params.y_kiln_center + 0.30)) ** 2
+                + (c[sb_ids, 2] - z_mid_drum) ** 2
+            )
+        ]
+    )
+    self.assertEqual(float(vf_sys.f_eff[left_id, back_id]), 0.0)
+
+  def test_exhaust_hood_frustum_occludes_far_wall_from_ceiling_sensor(
+      self,
+  ) -> None:
+    """Dropped exhaust hood cone blocks ceiling_hood_rim_room from seeing far upper wall."""
+    cfg_flush = copy.deepcopy(self.base_pb)
+    cfg_flush.geometry.hood.d_hood_inlet_mm = 800.0
+    cfg_flush.geometry.hood.z_hood_drop_mm = 0.0
+    cfg_flush.thermal.emissivities.eps_reflector_top = 0.99
+    p_flush = params_lib.from_proto(cfg_flush)
+    m_flush = mesh_lib.build_mesh(p_flush)
+    vf_flush = vf_lib.compute_view_factors(m_flush, p_flush)
+
+    cfg_drop = copy.deepcopy(cfg_flush)
+    cfg_drop.geometry.hood.z_hood_drop_mm = 600.0
+    p_drop = params_lib.from_proto(cfg_drop)
+    vf_drop = vf_lib.compute_view_factors(m_flush, p_drop)
+
+    sl_ids = np.flatnonzero(
+        m_flush.surface_types == int(mesh_lib.SurfaceType.SHIELD_LEFT)
+    )
+    c_sl = m_flush.centroids[sl_ids]
+    wall_id = int(
+        sl_ids[np.argmin((c_sl[:, 0] - 0.30) ** 2 + (c_sl[:, 2] - 1.95) ** 2)]
+    )
+    vf_val_flush = float(vf_flush.sensor_vf["ceiling_hood_rim_room"][wall_id])
+    vf_val_drop = float(vf_drop.sensor_vf["ceiling_hood_rim_room"][wall_id])
+    self.assertGreater(vf_val_flush, 0.0)
+    self.assertEqual(vf_val_drop, 0.0)
+
+  def test_ssr_side_flanges_receive_direct_radiation_from_kiln_drum(
+      self,
+  ) -> None:
+    """Tangential SSR side flanges see the kiln drum while the rear face does not."""
+    cfg = copy.deepcopy(self.base_pb)
+    cfg.geometry.floor.d_reflector_mm = 0.0
+    cfg.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg.geometry.floor.g_floor_reflector_mm = 0.0
+    cfg.thermal.emissivities.eps_reflector_top = 0.99
+    params = params_lib.from_proto(cfg)
+    mesh = mesh_lib.build_mesh(params)
+    vf_sys = vf_lib.compute_view_factors(mesh, params)
+
+    stypes = mesh.surface_types
+    ssr_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.SSR_BOX))
+    kiln_side_mask = stypes == int(mesh_lib.SurfaceType.KILN_SIDE)
+    self.assertEqual(ssr_ids.size, 3)
+
+    self.assertEqual(
+        float(np.sum(vf_sys.f_eff[ssr_ids[0], kiln_side_mask])), 0.0
+    )
+    self.assertGreater(
+        float(np.sum(vf_sys.f_eff[ssr_ids[1], kiln_side_mask])), 0.02
+    )
+    self.assertGreater(
+        float(np.sum(vf_sys.f_eff[ssr_ids[2], kiln_side_mask])), 0.02
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

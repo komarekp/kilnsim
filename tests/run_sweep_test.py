@@ -310,8 +310,78 @@ class RunSweepAndLoggingTest(unittest.TestCase):
   def test_geometry_group_reuses_lu_factor_across_hood_sizes_and_warm_starts(
       self,
   ) -> None:
-    """Verifies lu_factor is computed once per group and shared across hood sizes."""
-    pt_hood700 = run_sweep.SweepPoint(
+    """Verifies mesh is shared across hood sizes while VFs/LU reuse across non-hood params."""
+    pt_hood700_cfm350 = run_sweep.SweepPoint(
+        s_kiln_mm=200.0,
+        u_kiln_side=0.8,
+        w_floor_pad_mm=1200.0,
+        t_floor_pad_mm=0.0,
+        w_door_open_mm=150.0,
+        exhaust_fan_cfm=350.0,
+        d_reflector_mm=800.0,
+        t_reflector_calsil_mm=0.0,
+        g_floor_reflector_mm=5.0,
+        d_chimney_mm=0.0,
+        g_chimney_mm=0.0,
+        w_shield_mm=1200.0,
+        d_hood_inlet_mm=700.0,
+        bung_captured=True,
+    )
+    pt_hood700_cfm450 = dataclasses.replace(
+        pt_hood700_cfm350, exhaust_fan_cfm=450.0
+    )
+    pt_hood800_cfm450 = dataclasses.replace(
+        pt_hood700_cfm450, d_hood_inlet_mm=800.0
+    )
+    self.assertEqual(
+        pt_hood700_cfm350.geometry_cache_key,
+        pt_hood800_cfm450.geometry_cache_key,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      tmp_path = pathlib.Path(tmp_dir)
+      output_dir = tmp_path / "results"
+      output_dir.mkdir()
+      paths = []
+      for pt in (pt_hood700_cfm350, pt_hood700_cfm450, pt_hood800_cfm450):
+        cfg = run_sweep.build_config_proto(pt)
+        cfg.grid.dx_wall_mm = 200.0
+        cfg.grid.dz_wall_mm = 200.0
+        cfg.grid.n_theta_kiln = 8
+        cfg.grid.n_z_kiln = 3
+        p = tmp_path / f"{pt.experiment_name}.textproto"
+        run_sweep.write_config_textproto(cfg, p)
+        paths.append(str(p))
+
+      with (
+          unittest.mock.patch(
+              "src.mesh.build_mesh",
+              wraps=run_sweep.mesh_lib.build_mesh,
+          ) as mock_mesh,
+          unittest.mock.patch(
+              "src.view_factors.compute_view_factors",
+              wraps=run_sweep.vf_lib.compute_view_factors,
+          ) as mock_vf,
+          unittest.mock.patch(
+              "src.solver.factor_radiosity_matrix",
+              wraps=run_sweep.solver_lib.factor_radiosity_matrix,
+          ) as mock_lu,
+      ):
+        attempted, succeeded, failed = run_sweep._run_geometry_group(
+            paths, str(output_dir)
+        )
+        self.assertEqual(attempted, 3)
+        self.assertEqual(succeeded, 3)
+        self.assertEqual(failed, [])
+        self.assertEqual(mock_mesh.call_count, 1)
+        self.assertEqual(mock_vf.call_count, 2)
+        self.assertEqual(mock_lu.call_count, 2)
+
+  def test_geometry_group_updates_view_factors_when_hood_drop_changes(
+      self,
+  ) -> None:
+    """Changing z_hood_drop_mm in a group recomputes VFs and matches standalone solve."""
+    pt_drop150 = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
         u_kiln_side=0.8,
         w_floor_pad_mm=1200.0,
@@ -324,20 +394,23 @@ class RunSweepAndLoggingTest(unittest.TestCase):
         d_chimney_mm=0.0,
         g_chimney_mm=0.0,
         w_shield_mm=1200.0,
-        d_hood_inlet_mm=700.0,
+        d_hood_inlet_mm=800.0,
+        z_hood_drop_mm=150.0,
         bung_captured=True,
     )
-    pt_hood800 = dataclasses.replace(pt_hood700, d_hood_inlet_mm=800.0)
+    pt_drop600 = dataclasses.replace(pt_drop150, z_hood_drop_mm=600.0)
     self.assertEqual(
-        pt_hood700.geometry_cache_key, pt_hood800.geometry_cache_key
+        pt_drop150.geometry_cache_key, pt_drop600.geometry_cache_key
     )
 
     with tempfile.TemporaryDirectory() as tmp_dir:
       tmp_path = pathlib.Path(tmp_dir)
-      output_dir = tmp_path / "results"
-      output_dir.mkdir()
+      grouped_dir = tmp_path / "grouped"
+      standalone_dir = tmp_path / "standalone"
+      grouped_dir.mkdir()
+      standalone_dir.mkdir()
       paths = []
-      for pt in (pt_hood700, pt_hood800):
+      for pt in (pt_drop150, pt_drop600):
         cfg = run_sweep.build_config_proto(pt)
         cfg.grid.dx_wall_mm = 200.0
         cfg.grid.dz_wall_mm = 200.0
@@ -347,29 +420,40 @@ class RunSweepAndLoggingTest(unittest.TestCase):
         run_sweep.write_config_textproto(cfg, p)
         paths.append(str(p))
 
-      with (
-          unittest.mock.patch(
-              "src.view_factors.compute_view_factors",
-              wraps=run_sweep.vf_lib.compute_view_factors,
-          ) as mock_vf,
-          unittest.mock.patch(
-              "src.solver.factor_radiosity_matrix",
-              wraps=run_sweep.solver_lib.factor_radiosity_matrix,
-          ) as mock_lu,
-          unittest.mock.patch(
-              "src.view_factors.update_ceiling_sensor_vfs",
-              wraps=run_sweep.vf_lib.update_ceiling_sensor_vfs,
-          ) as mock_update_ceil,
-      ):
+      with unittest.mock.patch(
+          "src.view_factors.compute_view_factors",
+          wraps=run_sweep.vf_lib.compute_view_factors,
+      ) as mock_vf:
         attempted, succeeded, failed = run_sweep._run_geometry_group(
-            paths, str(output_dir)
+            paths, str(grouped_dir)
         )
         self.assertEqual(attempted, 2)
         self.assertEqual(succeeded, 2)
         self.assertEqual(failed, [])
-        self.assertEqual(mock_vf.call_count, 1)
-        self.assertEqual(mock_lu.call_count, 1)
-        self.assertEqual(mock_update_ceil.call_count, 1)
+        self.assertEqual(mock_vf.call_count, 2)
+
+      run_sweep._run_geometry_group([paths[1]], str(standalone_dir))
+      grouped_out = run_sweep.kiln_sim_pb2.SimulationOutput()
+      grouped_header = (
+          (grouped_dir / f"{pt_drop600.experiment_name}.out.textproto")
+          .read_bytes()
+          .split(b"\npatches {\n", 1)[0]
+          .decode("utf-8")
+      )
+      run_sweep.text_format.Parse(grouped_header, grouped_out)
+      standalone_out = run_sweep.kiln_sim_pb2.SimulationOutput()
+      standalone_header = (
+          (standalone_dir / f"{pt_drop600.experiment_name}.out.textproto")
+          .read_bytes()
+          .split(b"\npatches {\n", 1)[0]
+          .decode("utf-8")
+      )
+      run_sweep.text_format.Parse(standalone_header, standalone_out)
+      self.assertAlmostEqual(
+          grouped_out.metrics.t_ceiling_max_c,
+          standalone_out.metrics.t_ceiling_max_c,
+          delta=0.05,
+      )
 
 
 if __name__ == "__main__":

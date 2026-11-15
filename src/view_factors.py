@@ -251,6 +251,104 @@ def _is_segment_blocked_by_kiln_cylinder(
   return t_end > (t_start + 1e-6)
 
 
+def _is_segment_blocked_by_hood(
+    p1: np.ndarray,
+    p2: np.ndarray,
+    params: params_lib.SimParams,
+) -> np.ndarray:
+  """Returns boolean mask of line segments p1 -> p2 occluded by the hood frustum.
+
+  Models the solid conical/frustum exhaust hood centered at (x_hood, y_hood)
+  spanning z in [z_hood_inlet, h_wall] with radius varying linearly from
+  r_hood_inlet at z_hood_inlet to 0.5 * d_hood_duct at h_wall.
+  """
+  z_bot = params.z_hood_inlet + 1e-5
+  z_top = params.h_wall - 1e-5
+  r_bot = max(0.0, params.r_hood_inlet - 1e-4)
+  r_top = max(0.0, 0.5 * params.d_hood_duct - 1e-4)
+  if (
+      params.z_hood_drop <= 1e-5
+      or z_top <= z_bot
+      or max(r_bot, r_top) <= 0.0
+  ):
+    return np.zeros(p2.shape[0], dtype=bool)
+
+  p1_arr = np.broadcast_to(p1, p2.shape)
+  n_seg = p2.shape[0]
+  dz = p2[:, 2] - p1_arr[:, 2]
+
+  u_lo = np.ones(n_seg, dtype=np.float64)
+  u_hi = np.zeros(n_seg, dtype=np.float64)
+  non_horiz = np.abs(dz) > 1e-9
+  if np.any(non_horiz):
+    inv_dz = 1.0 / dz[non_horiz]
+    tz1 = (z_bot - p1_arr[non_horiz, 2]) * inv_dz
+    tz2 = (z_top - p1_arr[non_horiz, 2]) * inv_dz
+    u_lo[non_horiz] = np.clip(np.minimum(tz1, tz2), 0.0, 1.0)
+    u_hi[non_horiz] = np.clip(np.maximum(tz1, tz2), 0.0, 1.0)
+
+  horiz_in_z = (~non_horiz) & (p1_arr[:, 2] >= z_bot) & (p1_arr[:, 2] <= z_top)
+  if np.any(horiz_in_z):
+    u_lo[horiz_in_z] = 0.0
+    u_hi[horiz_in_z] = 1.0
+
+  u_a = np.minimum(1.0, u_lo + 1e-6)
+  u_b = np.maximum(0.0, u_hi - 1e-6)
+  valid_z = u_b > u_a
+  if not np.any(valid_z):
+    return np.zeros(n_seg, dtype=bool)
+
+  slope = (r_top - r_bot) / params.z_hood_drop
+  ox = p1_arr[:, 0] - params.x_hood
+  oy = p1_arr[:, 1] - params.y_hood
+  dx = p2[:, 0] - p1_arr[:, 0]
+  dy = p2[:, 1] - p1_arr[:, 1]
+  r0 = r_bot + slope * (p1_arr[:, 2] - params.z_hood_inlet)
+  dr = slope * dz
+
+  a_q = dx * dx + dy * dy - dr * dr
+  b_q = 2.0 * (ox * dx + oy * dy - r0 * dr)
+  c_q = ox * ox + oy * oy - r0 * r0
+
+  q_a = a_q * u_a * u_a + b_q * u_a + c_q
+  q_b = a_q * u_b * u_b + b_q * u_b + c_q
+  q_min = np.minimum(q_a, q_b)
+
+  # Convex parabola (A > 0) may attain its minimum strictly inside [u_a, u_b].
+  convex = valid_z & (a_q > 1e-12)
+  if np.any(convex):
+    u_star = np.clip(
+        -0.5 * b_q[convex] / a_q[convex], u_a[convex], u_b[convex]
+    )
+    q_star = a_q[convex] * u_star * u_star + b_q[convex] * u_star + c_q[convex]
+    q_min[convex] = np.minimum(q_min[convex], q_star)
+
+  return valid_z & (q_min < 0.0)
+
+
+def _is_segment_blocked_by_solids(
+    p1: np.ndarray,
+    p2: np.ndarray,
+    params: params_lib.SimParams,
+    check_kiln_cyl: bool = True,
+    check_hood: bool = True,
+    check_reflector_disk: bool = False,
+) -> np.ndarray:
+  """Returns boolean mask of segments blocked by enabled solid bodies."""
+  blocked = np.zeros(p2.shape[0], dtype=bool)
+  if check_kiln_cyl:
+    blocked |= _is_segment_blocked_by_kiln_cylinder(
+        p1=p1, p2=p2, params=params
+    )
+  if check_hood:
+    blocked |= _is_segment_blocked_by_hood(p1=p1, p2=p2, params=params)
+  if check_reflector_disk:
+    blocked |= _is_segment_blocked_by_reflector_disk(
+        p1=p1, p2=p2, params=params
+    )
+  return blocked
+
+
 def _sample_disk_quadrature(
     x_center: float,
     y_center: float,
@@ -297,6 +395,7 @@ def _compute_point_to_disk_vf(
     params: params_lib.SimParams,
     check_kiln_cyl: bool = False,
     check_reflector_disk: bool = False,
+    check_hood: bool = True,
 ) -> float:
   """Integrates dF_{pt -> disk} over polar sub-elements with ray occlusion."""
   if disk_sub_coords.shape[0] == 0 or d_area_sub <= 0.0:
@@ -311,18 +410,17 @@ def _compute_point_to_disk_vf(
   if not np.any(valid):
     return 0.0
 
-  if check_kiln_cyl or check_reflector_disk:
+  if check_kiln_cyl or check_reflector_disk or check_hood:
     valid_idx = np.flatnonzero(valid)
     p1_b = np.broadcast_to(pt_coord, disk_sub_coords[valid_idx].shape)
-    blocked = np.zeros(valid_idx.size, dtype=bool)
-    if check_kiln_cyl:
-      blocked |= _is_segment_blocked_by_kiln_cylinder(
-          p1=disk_sub_coords[valid_idx], p2=p1_b, params=params
-      )
-    if check_reflector_disk:
-      blocked |= _is_segment_blocked_by_reflector_disk(
-          p1=pt_coord, p2=disk_sub_coords[valid_idx], params=params
-      )
+    blocked = _is_segment_blocked_by_solids(
+        p1=disk_sub_coords[valid_idx],
+        p2=p1_b,
+        params=params,
+        check_kiln_cyl=check_kiln_cyl,
+        check_hood=check_hood,
+        check_reflector_disk=check_reflector_disk,
+    )
     valid[valid_idx[blocked]] = False
     if not np.any(valid):
       return 0.0
@@ -344,6 +442,7 @@ def _compute_disk_to_patches_af(
     annulus_r_min: float | None = None,
     check_kiln_cyl: bool = False,
     check_reflector_disk: bool = False,
+    check_hood: bool = True,
 ) -> np.ndarray:
   """Integrates exchange areas A_m * F_{m -> disk} over polar sub-elements."""
   if disk_sub_coords.shape[0] == 0 or c_cand.shape[0] == 0:
@@ -364,20 +463,19 @@ def _compute_disk_to_patches_af(
     if np.any(annulus_only_rows):
       vis_mr[annulus_only_rows, :] &= rr_flat[None, :] >= annulus_r_min - 1e-4
 
-  if check_kiln_cyl or check_reflector_disk:
+  if check_kiln_cyl or check_reflector_disk or check_hood:
     vis_m_idx, vis_q_idx = np.nonzero(vis_mr)
     if vis_m_idx.size > 0:
       p1_vis = disk_sub_coords[vis_q_idx]
       p2_vis = c_cand[vis_m_idx]
-      blocked = np.zeros(vis_m_idx.size, dtype=bool)
-      if check_kiln_cyl:
-        blocked |= _is_segment_blocked_by_kiln_cylinder(
-            p1=p1_vis, p2=p2_vis, params=params
-        )
-      if check_reflector_disk:
-        blocked |= _is_segment_blocked_by_reflector_disk(
-            p1=p1_vis, p2=p2_vis, params=params
-        )
+      blocked = _is_segment_blocked_by_solids(
+          p1=p1_vis,
+          p2=p2_vis,
+          params=params,
+          check_kiln_cyl=check_kiln_cyl,
+          check_hood=check_hood,
+          check_reflector_disk=check_reflector_disk,
+      )
       vis_mr[vis_m_idx[blocked], vis_q_idx[blocked]] = False
 
   denom_mr = math.pi * dist_sq_mr + 0.5 * (a_cand[:, None] + d_area_sub)
@@ -422,6 +520,8 @@ def _compute_point_to_patches_vf(
     patch_normals: np.ndarray,
     patch_areas: np.ndarray,
     exclude_mask: np.ndarray,
+    params: params_lib.SimParams | None = None,
+    check_reflector_disk: bool = True,
 ) -> np.ndarray:
   """Computes differential view factors dF_{pt -> n} from a point to patches."""
   r_vec = patch_centroids - pt_coord[None, :]
@@ -432,6 +532,18 @@ def _compute_point_to_patches_vf(
   cos_theta_n = -np.sum(r_vec * patch_normals, axis=1) / dist
 
   valid = (cos_theta_pt > 1e-6) & (cos_theta_n > 1e-6) & (~exclude_mask)
+  if params is not None and np.any(valid):
+    valid_idx = np.flatnonzero(valid)
+    blocked = _is_segment_blocked_by_solids(
+        p1=pt_coord,
+        p2=patch_centroids[valid_idx],
+        params=params,
+        check_kiln_cyl=True,
+        check_hood=True,
+        check_reflector_disk=check_reflector_disk,
+    )
+    valid[valid_idx[blocked]] = False
+
   vf = np.zeros_like(patch_areas, dtype=np.float64)
   denom = math.pi * dist_sq[valid] + 0.5 * patch_areas[valid]
   vf[valid] = (
@@ -480,6 +592,24 @@ def compute_view_factors(
   ssr_mask = stypes == int(mesh_lib.SurfaceType.SSR_BOX)
   vis[np.ix_(kiln_side_mask, ssr_mask)] = False
   vis[np.ix_(ssr_mask, kiln_side_mask)] = False
+
+  # Block pairwise diffuse rays occluded by solid kiln drum, exhaust hood,
+  # or floor reflector disk.
+  vis_m_idx, vis_n_idx = np.nonzero(np.triu(vis, k=1))
+  if vis_m_idx.size > 0:
+    blocked_vis = _is_segment_blocked_by_solids(
+        p1=c[vis_m_idx],
+        p2=c[vis_n_idx],
+        params=params,
+        check_kiln_cyl=True,
+        check_hood=True,
+        check_reflector_disk=True,
+    )
+    if np.any(blocked_vis):
+      bm = vis_m_idx[blocked_vis]
+      bn = vis_n_idx[blocked_vis]
+      vis[bm, bn] = False
+      vis[bn, bm] = False
 
   # 2. Symmetric exchange area matrix A_m * F_{m -> n}
   af_matrix = np.zeros((n_patches, n_patches), dtype=np.float64)
@@ -617,6 +747,75 @@ def compute_view_factors(
       )
       af_matrix[cand_ids_bot, b_id] = af_cand_bot
       af_matrix[b_id, cand_ids_bot] = af_cand_bot
+
+  # 3e. Tangential SSR_BOX side flanges <-> KILN_SIDE direct exchange via
+  # surface quadrature (the rear face ssr_ids[0] points radially outward).
+  kiln_side_ids_all = np.flatnonzero(kiln_side_mask)
+  if (
+      ssr_ids.size == 3
+      and kiln_side_ids_all.size > 0
+      and params.d_ssr > 0.0
+      and params.h_ssr > 0.0
+  ):
+    ur_x = math.cos(params.ssr_angle_rad)
+    ur_y = math.sin(params.ssr_angle_rad)
+    ut_x = -ur_y
+    ut_y = ur_x
+    n_u = constants.SSR_QUAD_U
+    n_v = constants.SSR_QUAD_V
+    u_fracs = (np.arange(n_u, dtype=np.float64) + 0.5) / n_u
+    v_fracs = (np.arange(n_v, dtype=np.float64) + 0.5) / n_v
+    rr_f, zz_f = np.meshgrid(
+        params.r_kiln + params.d_ssr * u_fracs,
+        params.z_ssr_bot + params.h_ssr * v_fracs,
+        indexing="ij",
+    )
+    rr_flat = rr_f.ravel()
+    zz_flat = zz_f.ravel()
+    d_area_ssr = (params.d_ssr * params.h_ssr) / (n_u * n_v)
+    c_ks = c[kiln_side_ids_all]
+    n_ks = n_vec[kiln_side_ids_all]
+    a_ks = areas[kiln_side_ids_all]
+
+    for flange_id, sign in ((int(ssr_ids[1]), -1.0), (int(ssr_ids[2]), 1.0)):
+      sub_pts = np.column_stack([
+          params.x_kiln_center
+          + rr_flat * ur_x
+          + sign * 0.5 * params.w_ssr * ut_x,
+          params.y_kiln_center
+          + rr_flat * ur_y
+          + sign * 0.5 * params.w_ssr * ut_y,
+          zz_flat,
+      ])
+      flange_normal = np.array([sign * ut_x, sign * ut_y, 0.0], dtype=np.float64)
+      r_fk = c_ks[None, :, :] - sub_pts[:, None, :]
+      d_sq_fk = np.sum(r_fk * r_fk, axis=2)
+      d_fk = np.sqrt(np.maximum(d_sq_fk, 1e-12))
+      cos_f = np.sum(r_fk * flange_normal[None, None, :], axis=2) / d_fk
+      cos_k = -np.sum(r_fk * n_ks[None, :, :], axis=2) / d_fk
+      vis_fk = (cos_f > 1e-6) & (cos_k > 1e-6)
+      q_idx, k_idx = np.nonzero(vis_fk)
+      if q_idx.size > 0:
+        blocked_fk = _is_segment_blocked_by_solids(
+            p1=sub_pts[q_idx],
+            p2=c_ks[k_idx],
+            params=params,
+            check_kiln_cyl=True,
+            check_hood=True,
+            check_reflector_disk=True,
+        )
+        vis_fk[q_idx[blocked_fk], k_idx[blocked_fk]] = False
+      denom_fk = math.pi * d_sq_fk + 0.5 * (a_ks[None, :] + d_area_ssr)
+      af_fk = np.sum(
+          np.where(
+              vis_fk,
+              cos_f * cos_k * d_area_ssr * a_ks[None, :] / denom_fk,
+              0.0,
+          ),
+          axis=0,
+      )
+      af_matrix[flange_id, kiln_side_ids_all] = af_fk
+      af_matrix[kiln_side_ids_all, flange_id] = af_fk
 
   f_direct = np.divide(
       af_matrix,
@@ -761,10 +960,13 @@ def compute_view_factors(
               np.full(hit_m_idx.size, params.z_reflector_top, dtype=np.float64),
           ])
           p2_targets = c_t[hit_m_idx]
-          blocked_b = _is_segment_blocked_by_kiln_cylinder(
+          blocked_b = _is_segment_blocked_by_solids(
               p1=p1_hits,
               p2=p2_targets,
               params=params,
+              check_kiln_cyl=True,
+              check_hood=True,
+              check_reflector_disk=False,
           )
           hit_b[hit_m_idx[blocked_b], hit_q_idx[blocked_b]] = False
 
@@ -849,8 +1051,13 @@ def compute_view_factors(
             np.full(ks_m_idx.size, params.z_reflector_top, dtype=np.float64),
         ])
         p2_ks_targets = c_t[ks_m_idx]
-        blocked_ks = _is_segment_blocked_by_kiln_cylinder(
-            p1=p1_ks_hits, p2=p2_ks_targets, params=params
+        blocked_ks = _is_segment_blocked_by_solids(
+            p1=p1_ks_hits,
+            p2=p2_ks_targets,
+            params=params,
+            check_kiln_cyl=True,
+            check_hood=True,
+            check_reflector_disk=False,
         )
         hit_ks[ks_m_idx[blocked_ks], ks_k_idx[blocked_ks]] = False
 
@@ -905,22 +1112,25 @@ def compute_view_factors(
   f_room = np.maximum(0.0, 1.0 - row_sums)
 
   # 6. Floor point-to-patch view factor vectors (accounting for occlusion by
-  # the circular reflector disk and finite-disk integration over KILN_BOTTOM).
+  # the circular reflector disk, kiln cylinder, hood frustum, and finite-disk
+  # integration over KILN_BOTTOM).
   sensor_vf: dict[str, np.ndarray] = {}
-  exclude_floor = stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
+  exclude_floor = (
+      (stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP))
+      | (stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+  )
   for name, sensor in mesh.floor_sensors.items():
     pt_c = np.array(sensor.position_m, dtype=np.float64)
     pt_n = np.array(sensor.normal, dtype=np.float64)
-    blocked_patches = _is_segment_blocked_by_reflector_disk(
-        p1=pt_c, p2=c, params=params
-    )
     vf_vec = _compute_point_to_patches_vf(
         pt_coord=pt_c,
         pt_normal=pt_n,
         patch_centroids=c,
         patch_normals=n_vec,
         patch_areas=areas,
-        exclude_mask=exclude_floor | blocked_patches,
+        exclude_mask=exclude_floor,
+        params=params,
+        check_reflector_disk=True,
     )
     if bot_ids.size == 1:
       vf_vec[int(bot_ids[0])] = _compute_point_to_kiln_bottom_vf_with_occlusion(
@@ -1022,6 +1232,8 @@ def compute_ceiling_sensor_vfs(
         patch_normals=n_vec,
         patch_areas=areas,
         exclude_mask=exclude_ceil,
+        params=params,
+        check_reflector_disk=True,
     )
     if lid_ids.size == 1 and params.r_kiln > 0.0:
       vf_vec[int(lid_ids[0])] = _compute_point_to_disk_vf(
@@ -1092,10 +1304,13 @@ def compute_ceiling_sensor_vfs(
                     hit_cks_idx.size, params.z_reflector_top, dtype=np.float64
                 ),
             ])
-            blocked_cks = _is_segment_blocked_by_kiln_cylinder(
+            blocked_cks = _is_segment_blocked_by_solids(
                 p1=p1_cks,
                 p2=np.broadcast_to(pt_c, p1_cks.shape),
                 params=params,
+                check_kiln_cyl=True,
+                check_hood=True,
+                check_reflector_disk=False,
             )
             hit_cks[hit_cks_idx[blocked_cks]] = False
             if np.any(hit_cks):
@@ -1141,10 +1356,13 @@ def compute_ceiling_sensor_vfs(
                       hit_cb_idx.size, params.z_reflector_top, dtype=np.float64
                   ),
               ])
-              blocked_cb = _is_segment_blocked_by_kiln_cylinder(
+              blocked_cb = _is_segment_blocked_by_solids(
                   p1=p1_cb,
                   p2=np.broadcast_to(pt_c, p1_cb.shape),
                   params=params,
+                  check_kiln_cyl=True,
+                  check_hood=True,
+                  check_reflector_disk=False,
               )
               hit_cb[hit_cb_idx[blocked_cb]] = False
               if np.any(hit_cb):

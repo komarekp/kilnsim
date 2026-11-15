@@ -545,7 +545,7 @@ def _run_geometry_group(
   mesh = None
   vf_sys = None
   lu_piv = None
-  cached_r_hood_inlet: float | None = None
+  cached_hood_key: tuple[float, ...] | None = None
   last_converged_solution: solver_lib.SolverSolution | None = None
   geometry_error: str | None = None
   attempted = 0
@@ -573,12 +573,19 @@ def _run_geometry_group(
         )
         continue
 
+      hood_key = (
+          params.r_hood_inlet,
+          params.d_hood_duct,
+          params.z_hood_drop,
+          params.x_hood,
+          params.y_hood,
+      )
       if mesh is None or vf_sys is None or lu_piv is None:
         try:
           mesh = mesh_lib.build_mesh(params)
           vf_sys = vf_lib.compute_view_factors(mesh, params)
           lu_piv = solver_lib.factor_radiosity_matrix(mesh, vf_sys)
-          cached_r_hood_inlet = params.r_hood_inlet
+          cached_hood_key = hood_key
         except Exception as exc:  # pylint: disable=broad-exception-caught
           geometry_error = f"{type(exc).__name__}: {exc}"
           failed_runs.append(
@@ -589,12 +596,12 @@ def _run_geometry_group(
               )
           )
           continue
-      elif (
-          cached_r_hood_inlet is None
-          or abs(params.r_hood_inlet - cached_r_hood_inlet) > 1e-6
+      elif cached_hood_key is None or any(
+          abs(a - b) > 1e-6 for a, b in zip(hood_key, cached_hood_key)
       ):
-        vf_sys = vf_lib.update_ceiling_sensor_vfs(vf_sys, mesh, params)
-        cached_r_hood_inlet = params.r_hood_inlet
+        vf_sys = vf_lib.compute_view_factors(mesh, params)
+        lu_piv = solver_lib.factor_radiosity_matrix(mesh, vf_sys)
+        cached_hood_key = hood_key
 
       solution = solver_lib.solve_thermal_system(
           mesh=mesh,
