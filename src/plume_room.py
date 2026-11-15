@@ -42,6 +42,10 @@ class RoomSolution:
   t_room_upper_k: float
   t_room_lower_k: float
   z_stratification_layer_m: float
+  t_plume_at_hood_k: float = 0.0
+  v_dot_hood_eff_m3_s: float = 0.0
+  m_dot_door_buoy_kg_s: float = 0.0
+  q_hood_exhaust_w: float = 0.0
 
 
 def solve_plume_and_room(
@@ -92,6 +96,7 @@ def solve_plume_and_room(
         t_room_upper_k=params.t_ext_k,
         t_room_lower_k=params.t_ext_k,
         z_stratification_layer_m=params.z_hood_inlet,
+        t_plume_at_hood_k=params.t_ext_k,
     )
 
   # 2. Virtual origin z_v of an area source of diameter d_kiln (Heskestad / MTT)
@@ -109,20 +114,19 @@ def solve_plume_and_room(
   m_eff = 1.0 + 3.0 * math.exp(-((s_eff / max(b_gaussian, 1e-3)) ** 2))
 
   # 4. Corner-modified MTT volumetric plume flow rate at z = z_hood_inlet.
+  q_eff_kw = q_kw * m_eff
   m_dot_plume_kg_s = (
       constants.MTT_PLUME_FLOW_COEFF
-      * ((q_kw * m_eff) ** (1.0 / 3.0))
+      * (q_eff_kw ** (1.0 / 3.0))
       * (dz_plume ** (5.0 / 3.0))
-      / (m_eff ** (1.0 / 3.0))
-  )
-  m_dot_plume_kg_s += (
-      constants.MTT_SOURCE_ENTRAINMENT_COEFF
-      * (q_kw ** (1.0 / 3.0))
+      + constants.MTT_SOURCE_ENTRAINMENT_COEFF
+      * (q_eff_kw ** (1.0 / 3.0))
       * params.d_kiln
-  )
+  ) / m_eff
   dt_plume_mean = q_plume_total_w / (
       max(m_dot_plume_kg_s, 1e-4) * constants.AIR_CP
   )
+  t_plume_at_hood_k = t_lower_prev_k + dt_plume_mean
   rho_plume = constants.AIR_RHO_REF * (
       t_lower_prev_k / (t_lower_prev_k + dt_plume_mean)
   )
@@ -142,8 +146,13 @@ def solve_plume_and_room(
     eta_geom = 1.0
   else:
     sigma_r = max(0.05, r_plume_95 / constants.GAUSSIAN_95_RADIUS_MULTIPLIER)
-    eta_geom = 1.0 - math.exp(
-        -0.5 * ((params.r_hood_inlet / sigma_r) ** 2)
+    norm_95 = 1.0 - math.exp(
+        -0.5 * (constants.GAUSSIAN_95_RADIUS_MULTIPLIER ** 2)
+    )
+    eta_geom = min(
+        1.0,
+        (1.0 - math.exp(-0.5 * ((params.r_hood_inlet / sigma_r) ** 2)))
+        / norm_95,
     )
 
   if params.v_dot_hood_m3_s <= 0.0:
@@ -292,4 +301,5 @@ def solve_plume_and_room(
       t_room_upper_k=t_room_upper_k,
       t_room_lower_k=t_room_lower_k,
       z_stratification_layer_m=z_layer,
+      t_plume_at_hood_k=t_plume_at_hood_k,
   )

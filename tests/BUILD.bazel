@@ -55,6 +55,21 @@ py_test(
 )
 
 py_test(
+    name = "plume_room_test",
+    size = "small",
+    srcs = ["plume_room_test.py"],
+    data = ["//:configs"],
+    deps = [
+        "//src:chimney",
+        "//src:constants",
+        "//src:io_manager",
+        "//src:mesh",
+        "//src:params",
+        "//src:plume_room",
+    ],
+)
+
+py_test(
     name = "solver_test",
     size = "medium",
     srcs = ["solver_test.py"],
