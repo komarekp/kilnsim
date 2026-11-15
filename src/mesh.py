@@ -10,6 +10,7 @@ import enum
 import math
 from typing import Any, Optional
 import numpy as np
+from src import constants
 from src import params as params_lib
 from proto import kiln_sim_pb2
 
@@ -347,6 +348,39 @@ class SurfaceMesh:
     return "".join(blocks)
 
 
+def _exposed_gypsum_span(
+    start_m: float, room_extent_m: float, dx_wall_m: float
+) -> tuple[float, float, int]:
+  """Computes exposed gypsum band width and column count along one wall."""
+  band_end = min(room_extent_m, start_m + constants.EXPOSED_GYPSUM_BAND_WIDTH_M)
+  width_m = max(dx_wall_m, band_end - start_m)
+  n_cols = max(1, int(round(width_m / dx_wall_m)))
+  return width_m, width_m / n_cols, n_cols
+
+
+def expected_patch_count(params: params_lib.SimParams) -> int:
+  """Computes the exact number of discretized patches built for `params`."""
+  n_cols_left = max(1, int(round(params.w_shield_left / params.dx_wall)))
+  n_cols_back = max(1, int(round(params.w_shield_back / params.dx_wall)))
+  n_rows_shield = max(1, int(round(params.h_shield / params.dz_wall)))
+  n_rows_wall = max(1, int(round(params.h_wall / params.dz_wall)))
+
+  _, _, n_cols_gyp_left = _exposed_gypsum_span(
+      params.x_shield_left_end, params.l_room, params.dx_wall
+  )
+  _, _, n_cols_gyp_back = _exposed_gypsum_span(
+      params.y_shield_back_end, params.w_room, params.dx_wall
+  )
+
+  return (
+      (n_cols_left + n_cols_back) * n_rows_shield
+      + (n_cols_gyp_left + n_cols_gyp_back) * n_rows_wall
+      + params.n_theta_kiln * params.n_z_kiln
+      + constants.NUM_SINGLE_CAP_PATCHES
+      + constants.NUM_SSR_FACES
+  )
+
+
 def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
   """Discretizes the simulation domain into a vectorized SurfaceMesh.
 
@@ -451,18 +485,16 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
       )
 
   # 3. Discretize Exposed GYPSUM_LEFT (x in [x_shield_left_end, x_max_gyp])
-  gyp_band_width = 1.0
-  x_gyp_start = params.x_shield_left_end
-  x_gyp_end = min(params.l_room, x_gyp_start + gyp_band_width)
-  w_gyp_left = max(params.dx_wall, x_gyp_end - x_gyp_start)
-  n_cols_gyp_left = max(1, int(round(w_gyp_left / params.dx_wall)))
+  w_gyp_left, dx_gyp_left, n_cols_gyp_left = _exposed_gypsum_span(
+      params.x_shield_left_end, params.l_room, params.dx_wall
+  )
+  del w_gyp_left
   n_rows_wall = max(1, int(round(params.h_wall / params.dz_wall)))
-  dx_gyp_left = w_gyp_left / n_cols_gyp_left
   dz_wall = params.h_wall / n_rows_wall
 
   for i in range(n_cols_gyp_left):
-    x0 = x_gyp_start + i * dx_gyp_left
-    x1 = x_gyp_start + (i + 1) * dx_gyp_left
+    x0 = params.x_shield_left_end + i * dx_gyp_left
+    x1 = params.x_shield_left_end + (i + 1) * dx_gyp_left
     xc = 0.5 * (x0 + x1)
     for j in range(n_rows_wall):
       z0 = j * dz_wall
@@ -479,15 +511,14 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
       )
 
   # 4. Discretize Exposed GYPSUM_BACK (y in [y_shield_back_end, y_max_gyp])
-  y_gyp_start = params.y_shield_back_end
-  y_gyp_end = min(params.w_room, y_gyp_start + gyp_band_width)
-  w_gyp_back = max(params.dx_wall, y_gyp_end - y_gyp_start)
-  n_cols_gyp_back = max(1, int(round(w_gyp_back / params.dx_wall)))
-  dx_gyp_back = w_gyp_back / n_cols_gyp_back
+  w_gyp_back, dx_gyp_back, n_cols_gyp_back = _exposed_gypsum_span(
+      params.y_shield_back_end, params.w_room, params.dx_wall
+  )
+  del w_gyp_back
 
   for i in range(n_cols_gyp_back):
-    y0 = y_gyp_start + i * dx_gyp_back
-    y1 = y_gyp_start + (i + 1) * dx_gyp_back
+    y0 = params.y_shield_back_end + i * dx_gyp_back
+    y1 = params.y_shield_back_end + (i + 1) * dx_gyp_back
     yc = 0.5 * (y0 + y1)
     for j in range(n_rows_wall):
       z0 = j * dz_wall
@@ -670,7 +701,8 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
     )
 
   # 10. Floor point sensors
-  r_pad_sensor = params.r_reflector + 0.005
+  edge_off = constants.FLOOR_SENSOR_EDGE_OFFSET_M
+  r_pad_sensor = params.r_reflector + edge_off
   diag_inv = 1.0 / math.sqrt(2.0)
   floor_sensors = {
       "pad_center": FloorSensorPoint(
@@ -700,7 +732,7 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
       "vinyl_edge_x": FloorSensorPoint(
           name="vinyl_edge_x",
           position_m=(
-              params.w_floor_pad + 0.005,
+              params.w_floor_pad + edge_off,
               params.y_kiln_center,
               0.0,
           ),
@@ -709,7 +741,7 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
           name="vinyl_edge_y",
           position_m=(
               params.x_kiln_center,
-              params.w_floor_pad + 0.005,
+              params.w_floor_pad + edge_off,
               0.0,
           ),
       ),
@@ -730,13 +762,13 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
       params.x_kiln_center - params.x_shield_front_back_wall,
       params.y_kiln_center - params.y_shield_front_left_wall,
   )
-  r_max_corner = max(r_pad_sensor, math.sqrt(2.0) * d_corner_max - 0.005)
+  r_max_corner = max(r_pad_sensor, math.sqrt(2.0) * d_corner_max - edge_off)
 
   d_room_max = min(
       params.w_floor_pad - params.x_kiln_center,
       params.w_floor_pad - params.y_kiln_center,
   )
-  r_max_room = max(r_pad_sensor, math.sqrt(2.0) * d_room_max - 0.005)
+  r_max_room = max(r_pad_sensor, math.sqrt(2.0) * d_room_max - edge_off)
 
   for prefix, sign, r_max_dir in (
       ("pad_outside_corner", -1.0, r_max_corner),
@@ -745,9 +777,9 @@ def build_mesh(params: params_lib.SimParams) -> SurfaceMesh:
     candidate_radii = np.concatenate([
         np.linspace(r_pad_sensor, r_max_dir, 10),
         np.array([
-            r_shadow_near + 0.005,
-            r_shadow_near + 0.020,
-            r_shadow_near + 0.050,
+            r_shadow_near + edge_off,
+            r_shadow_near + 4.0 * edge_off,
+            r_shadow_near + 10.0 * edge_off,
             r_shadow_center,
         ]),
     ])

@@ -9,17 +9,17 @@ floor and ceiling safety sensors.
 import dataclasses
 import math
 import numpy as np
+from src import constants
 from src import mesh as mesh_lib
 from src import params as params_lib
 
 # Spatial offsets for ceiling point sensors at z = h_wall.
-CEILING_SENSOR_RIM_OFFSET_M: float = 0.010
-CEILING_SENSOR_WALL_OFFSET_M: float = 0.050
+CEILING_SENSOR_RIM_OFFSET_M: float = constants.CEILING_SENSOR_RIM_OFFSET_M
+CEILING_SENSOR_WALL_OFFSET_M: float = constants.CEILING_SENSOR_WALL_OFFSET_M
 
-# Quadrature grid resolution for integrating view factors from a floor sensor
-# across the finite circular kiln bottom disk with reflector-disk occlusion.
-_KILN_DISK_QUAD_R: int = 16
-_KILN_DISK_QUAD_THETA: int = 48
+# Quadrature grid resolution for integrating view factors across finite disks.
+_KILN_DISK_QUAD_R: int = constants.KILN_DISK_QUAD_R
+_KILN_DISK_QUAD_THETA: int = constants.KILN_DISK_QUAD_THETA
 
 
 @dataclasses.dataclass(frozen=True)
@@ -711,11 +711,11 @@ def compute_view_factors(
 
   f_eff = f_direct + f_mirror
 
-  # 5. Enforce row sum <= 0.995
+  # 5. Enforce row sum <= MAX_PATCH_VF_ROW_SUM
   row_sums = np.sum(f_eff, axis=1)
-  over_mask = row_sums > 0.995
+  over_mask = row_sums > constants.MAX_PATCH_VF_ROW_SUM
   if np.any(over_mask):
-    scale = 0.995 / row_sums[over_mask]
+    scale = constants.MAX_PATCH_VF_ROW_SUM / row_sums[over_mask]
     f_eff[over_mask, :] *= scale[:, None]
     row_sums = np.sum(f_eff, axis=1)
 
@@ -746,8 +746,8 @@ def compute_view_factors(
           params=params,
       )
     s_sum = float(np.sum(vf_vec))
-    if s_sum > 0.99:
-      vf_vec *= 0.99 / s_sum
+    if s_sum > constants.MAX_SENSOR_VF_SUM:
+      vf_vec *= constants.MAX_SENSOR_VF_SUM / s_sum
     sensor_vf[name] = vf_vec
 
   # 7. Ceiling downward-facing point-to-patch view factor vectors at z = h_wall
@@ -1010,8 +1010,8 @@ def compute_ceiling_sensor_vfs(
       )
 
     s_sum = float(np.sum(vf_vec))
-    if s_sum > 0.99:
-      vf_vec *= 0.99 / s_sum
+    if s_sum > constants.MAX_SENSOR_VF_SUM:
+      vf_vec *= constants.MAX_SENSOR_VF_SUM / s_sum
     ceil_sensor_vf[name] = vf_vec
 
   return ceil_sensor_vf

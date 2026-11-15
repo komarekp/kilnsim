@@ -3,25 +3,26 @@
 import math
 import numpy as np
 from scipy import optimize
+from src import constants
 from src import mesh as mesh_lib
 from src import params as params_lib
 from src import solver as solver_lib
 from src import view_factors as vf_lib
 from proto import kiln_sim_pb2
 
-# Engineering pass/fail temperature thresholds in degrees Celsius.
-LIMIT_GYPSUM_C: float = 40.0
-LIMIT_CEILING_C: float = 40.0
-LIMIT_SSR_AIR_C: float = 35.0
-LIMIT_SSR_CASE_C: float = 45.0
-LIMIT_VIP_C: float = 50.0
-LIMIT_VINYL_C: float = 45.0
+# Engineering pass/fail temperature thresholds in degrees Celsius (re-exported).
+LIMIT_GYPSUM_C: float = constants.LIMIT_GYPSUM_C
+LIMIT_CEILING_C: float = constants.LIMIT_CEILING_C
+LIMIT_SSR_AIR_C: float = constants.LIMIT_SSR_AIR_C
+LIMIT_SSR_CASE_C: float = constants.LIMIT_SSR_CASE_C
+LIMIT_VIP_C: float = constants.LIMIT_VIP_C
+LIMIT_VINYL_C: float = constants.LIMIT_VINYL_C
 
 # Floor surface emissivities and under-reflector / ceiling mixing coefficients.
-FLOOR_PAD_EMISSIVITY: float = 0.88
-VINYL_FLOOR_EMISSIVITY: float = 0.90
-H_CONV_UNDER_REFLECTOR_W_M2K: float = 3.0
-CHIMNEY_CEILING_MIXING_FRACTION: float = 0.35
+FLOOR_PAD_EMISSIVITY: float = constants.FLOOR_PAD_EMISSIVITY
+VINYL_FLOOR_EMISSIVITY: float = constants.VINYL_FLOOR_EMISSIVITY
+H_CONV_UNDER_REFLECTOR_W_M2K: float = constants.H_CONV_UNDER_REFLECTOR_W_M2K
+CHIMNEY_CEILING_MIXING_FRACTION: float = constants.CHIMNEY_CEILING_MIXING_FRACTION
 
 
 def get_kiln_front_face_temp_c(
@@ -93,8 +94,10 @@ def _solve_floor_sensor_temp_k(
   q_abs = eps_floor * g_incident
 
   def _res(t_k: float) -> float:
-    q_emit = eps_floor * params_lib.STEFAN_BOLTZMANN * (t_k ** 4)
-    h_conv = max(2.0, 1.5 * (abs(t_k - t_amb_k) ** 0.25))
+    q_emit = eps_floor * constants.STEFAN_BOLTZMANN * (t_k ** 4)
+    h_conv = max(
+        constants.H_CONV_MIN_W_M2K, 1.5 * (abs(t_k - t_amb_k) ** 0.25)
+    )
     q_conv = h_conv * (t_k - t_amb_k)
     q_cond = u_subfloor * (t_k - t_ext_k)
     return q_abs - q_emit - q_conv - q_cond

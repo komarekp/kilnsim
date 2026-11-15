@@ -7,16 +7,17 @@ conduction through the structural AAC block wall for each vertical shield column
 
 import dataclasses
 import numpy as np
+from src import constants
 from src import mesh as mesh_lib
 from src import params as params_lib
 
-# Dry air thermophysical properties at ~315 K and 1 atm.
-AIR_RHO_REF: float = 1.12  # kg / m^3
-AIR_CP: float = 1007.0  # J / (kg * K)
-AIR_MU: float = 1.91e-5  # Pa * s
-AIR_NU: float = 1.70e-5  # m^2 / s
-AIR_K: float = 0.0274  # W / (m * K)
-AIR_PR: float = 0.705  # Prandtl number
+# Dry air thermophysical properties at ~315 K and 1 atm (re-exported).
+AIR_RHO_REF: float = constants.AIR_RHO_REF
+AIR_CP: float = constants.AIR_CP
+AIR_MU: float = constants.AIR_MU
+AIR_NU: float = constants.AIR_NU
+AIR_K: float = constants.AIR_K
+AIR_PR: float = constants.AIR_PR
 
 
 @dataclasses.dataclass(frozen=True)

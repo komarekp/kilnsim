@@ -43,6 +43,7 @@ py_library(
     srcs = ["run_sweep.py"],
     deps = [
         "//proto:kiln_sim_py_pb2",
+        "//src:constants",
         "//src:io_manager",
         "//src:mesh",
         "//src:metrics",

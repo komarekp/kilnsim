@@ -4,6 +4,7 @@ import dataclasses
 import math
 import numpy as np
 from src import chimney as chimney_lib
+from src import constants
 from src import mesh as mesh_lib
 from src import params as params_lib
 
@@ -97,28 +98,32 @@ def solve_plume_and_room(
   q_kw = q_plume_total_w * 1e-3
   z_v = (
       params.z_kiln_top
-      - 1.02 * params.d_kiln
-      + 0.083 * (q_kw ** (2.0 / 5.0))
+      - constants.HESKESTAD_VIRTUAL_ORIGIN_DIAM_COEFF * params.d_kiln
+      + constants.HESKESTAD_VIRTUAL_ORIGIN_HEAT_COEFF * (q_kw ** (2.0 / 5.0))
   )
   dz_plume = max(0.15, params.z_hood_inlet - z_v)
 
   # 3. Hasemi / Mowrer-Williamson corner standoff image multiplier m_eff(z).
   s_eff = min(params.s_kiln_left, params.s_kiln_back) + params.r_kiln
-  b_gaussian = 0.12 * dz_plume
+  b_gaussian = constants.GAUSSIAN_PLUME_SPREAD_COEFF * dz_plume
   m_eff = 1.0 + 3.0 * math.exp(-((s_eff / max(b_gaussian, 1e-3)) ** 2))
 
   # 4. Corner-modified MTT volumetric plume flow rate at z = z_hood_inlet.
   m_dot_plume_kg_s = (
-      0.071
+      constants.MTT_PLUME_FLOW_COEFF
       * ((q_kw * m_eff) ** (1.0 / 3.0))
       * (dz_plume ** (5.0 / 3.0))
       / (m_eff ** (1.0 / 3.0))
   )
-  m_dot_plume_kg_s += 0.018 * (q_kw ** (1.0 / 3.0)) * params.d_kiln
-  dt_plume_mean = q_plume_total_w / (
-      max(m_dot_plume_kg_s, 1e-4) * chimney_lib.AIR_CP
+  m_dot_plume_kg_s += (
+      constants.MTT_SOURCE_ENTRAINMENT_COEFF
+      * (q_kw ** (1.0 / 3.0))
+      * params.d_kiln
   )
-  rho_plume = chimney_lib.AIR_RHO_REF * (
+  dt_plume_mean = q_plume_total_w / (
+      max(m_dot_plume_kg_s, 1e-4) * constants.AIR_CP
+  )
+  rho_plume = constants.AIR_RHO_REF * (
       t_lower_prev_k / (t_lower_prev_k + dt_plume_mean)
   )
   v_dot_plume_m3_s = m_dot_plume_kg_s / max(rho_plume, 0.5)
@@ -136,7 +141,7 @@ def solve_plume_and_room(
   if params.r_hood_inlet >= r_plume_95:
     eta_geom = 1.0
   else:
-    sigma_r = max(0.05, r_plume_95 / 2.45)
+    sigma_r = max(0.05, r_plume_95 / constants.GAUSSIAN_95_RADIUS_MULTIPLIER)
     eta_geom = 1.0 - math.exp(
         -0.5 * ((params.r_hood_inlet / sigma_r) ** 2)
     )
@@ -154,7 +159,7 @@ def solve_plume_and_room(
 
   # 6. Behind-shield chimney capture fraction.
   v_dot_surplus = max(0.0, params.v_dot_hood_m3_s - eta_plume * v_dot_plume_m3_s)
-  v_dot_chimney = chimney.m_dot_total_kg_s / chimney_lib.AIR_RHO_REF
+  v_dot_chimney = chimney.m_dot_total_kg_s / constants.AIR_RHO_REF
   z_shield_top = params.h_wall - params.g_ceil
   dist_wall_to_hood_rim = max(
       0.01,
@@ -229,29 +234,29 @@ def solve_plume_and_room(
   dt_lower = 0.2
   for _ in range(12):
     h_upper_door = max(0.05, params.h_door - z_layer)
-    v_door_buoy = 0.65 * math.sqrt(
-        params_lib.GRAVITY * h_upper_door * (max(0.0, dt_upper) / params.t_ext_k)
+    v_door_buoy = constants.DOOR_ORIFICE_DISCHARGE_COEFF * math.sqrt(
+        constants.GRAVITY * h_upper_door * (max(0.0, dt_upper) / params.t_ext_k)
     )
     m_dot_door_buoy = (
         0.5
-        * chimney_lib.AIR_RHO_REF
+        * constants.AIR_RHO_REF
         * params.w_door_open
         * h_upper_door
         * v_door_buoy
     )
-    m_dot_hood_flush = 0.25 * chimney_lib.AIR_RHO_REF * params.v_dot_hood_m3_s
+    m_dot_hood_flush = 0.25 * constants.AIR_RHO_REF * params.v_dot_hood_m3_s
     g_upper_ext = (
         ua_upper
-        + (m_dot_door_buoy + m_dot_hood_flush) * chimney_lib.AIR_CP
+        + (m_dot_door_buoy + m_dot_hood_flush) * constants.AIR_CP
     )
 
     m_dot_lower_ext = (
-        chimney_lib.AIR_RHO_REF * params.v_dot_hood_m3_s + m_dot_door_buoy
+        constants.AIR_RHO_REF * params.v_dot_hood_m3_s + m_dot_door_buoy
     )
-    g_lower_ext = ua_lower + m_dot_lower_ext * chimney_lib.AIR_CP
+    g_lower_ext = ua_lower + m_dot_lower_ext * constants.AIR_CP
 
     m_dot_recirc = max(0.0, m_dot_spill - m_dot_door_buoy)
-    g_recirc = m_dot_recirc * chimney_lib.AIR_CP
+    g_recirc = m_dot_recirc * constants.AIR_CP
 
     denom = (
         g_upper_ext * g_lower_ext

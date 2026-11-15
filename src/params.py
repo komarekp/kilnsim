@@ -8,34 +8,35 @@ dataclass and computes all derived vertical datums and geometric relationships.
 import dataclasses
 import math
 from absl import logging
+from src import constants
 from proto import kiln_sim_pb2
 
-# Physical constants in SI units.
-KELVIN_OFFSET: float = 273.15
-MM_TO_M: float = 1.0e-3
-M_TO_MM: float = 1.0e3
-CFM_TO_M3_S: float = 4.7194745e-4
-STEFAN_BOLTZMANN: float = 5.670374419e-8  # W / (m^2 * K^4)
-GRAVITY: float = 9.80665  # m / s^2
+# Physical constants in SI units (re-exported for backwards compatibility).
+KELVIN_OFFSET: float = constants.KELVIN_OFFSET
+MM_TO_M: float = constants.MM_TO_M
+M_TO_MM: float = constants.M_TO_MM
+CFM_TO_M3_S: float = constants.CFM_TO_M3_S
+STEFAN_BOLTZMANN: float = constants.STEFAN_BOLTZMANN
+GRAVITY: float = constants.GRAVITY
 
 # Standard interior and exterior film resistances for unshielded wall U-value.
-R_SI_WALL: float = 0.13  # m^2 * K / W
-R_SE_WALL: float = 0.04  # m^2 * K / W
+R_SI_WALL: float = constants.R_SI_WALL
+R_SE_WALL: float = constants.R_SE_WALL
 
 # Symbolic validation bounds in SI units (metres and dimensionless).
-MIN_SHIELD_HEIGHT_M: float = 0.20
-MIN_FLOOR_GAP_M: float = 0.0
-MIN_CEIL_GAP_M: float = 0.0
-MIN_REFLECTOR_GAP_M: float = 0.0
-MIN_REFLECTOR_THICKNESS_M: float = 0.0
-MIN_CHIMNEY_GAP_M: float = 0.0
-MAX_CHIMNEY_GAP_M: float = 0.100
-MIN_BLOCKAGE_FRACTION: float = 0.0
-MAX_BLOCKAGE_FRACTION: float = 1.0
-MIN_KILN_STANDOFF_M: float = 0.10
-MIN_HOOD_CLEARANCE_M: float = 0.10
-MIN_EMISSIVITY: float = 0.01
-MAX_EMISSIVITY: float = 0.99
+MIN_SHIELD_HEIGHT_M: float = constants.MIN_SHIELD_HEIGHT_M
+MIN_FLOOR_GAP_M: float = constants.MIN_FLOOR_GAP_M
+MIN_CEIL_GAP_M: float = constants.MIN_CEIL_GAP_M
+MIN_REFLECTOR_GAP_M: float = constants.MIN_REFLECTOR_GAP_M
+MIN_REFLECTOR_THICKNESS_M: float = constants.MIN_REFLECTOR_THICKNESS_M
+MIN_CHIMNEY_GAP_M: float = constants.MIN_CHIMNEY_GAP_M
+MAX_CHIMNEY_GAP_M: float = constants.MAX_CHIMNEY_GAP_M
+MIN_BLOCKAGE_FRACTION: float = constants.MIN_BLOCKAGE_FRACTION
+MAX_BLOCKAGE_FRACTION: float = constants.MAX_BLOCKAGE_FRACTION
+MIN_KILN_STANDOFF_M: float = constants.MIN_KILN_STANDOFF_M
+MIN_HOOD_CLEARANCE_M: float = constants.MIN_HOOD_CLEARANCE_M
+MIN_EMISSIVITY: float = constants.MIN_EMISSIVITY
+MAX_EMISSIVITY: float = constants.MAX_EMISSIVITY
 
 
 @dataclasses.dataclass(frozen=True)

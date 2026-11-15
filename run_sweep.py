@@ -41,6 +41,7 @@ except ImportError:
 from absl import app  # pylint: disable=g-import-not-at-top
 from absl import flags  # pylint: disable=g-import-not-at-top
 from absl import logging  # pylint: disable=g-import-not-at-top
+from src import constants  # pylint: disable=g-import-not-at-top
 from src import io_manager  # pylint: disable=g-import-not-at-top
 from src import mesh as mesh_lib  # pylint: disable=g-import-not-at-top
 from src import metrics as metrics_lib  # pylint: disable=g-import-not-at-top
@@ -279,56 +280,58 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
   cfg = kiln_sim_pb2.SimulationConfig()
   cfg.experiment_name = point.experiment_name
 
-  # Shield geometry (12.5 mm thickness from recent 40screed baseline).
+  # Shield geometry.
   cfg.geometry.shield.w_shield_left_mm = point.w_shield_mm
   cfg.geometry.shield.w_shield_back_mm = point.w_shield_mm
   cfg.geometry.shield.g_floor_mm = point.g_chimney_mm
   cfg.geometry.shield.g_ceil_mm = point.g_chimney_mm
-  cfg.geometry.shield.t_shield_mm = 12.5
+  cfg.geometry.shield.t_shield_mm = constants.DEFAULT_SHIELD_THICKNESS_MM
 
   # Room and behind-shield chimney geometry.
-  cfg.geometry.room.h_wall_mm = 2345.0
-  cfg.geometry.room.t_gypsum_mm = 12.5
-  cfg.geometry.room.t_aac_mm = 215.0
-  cfg.geometry.room.l_room_mm = 3530.0
-  cfg.geometry.room.w_room_mm = 2770.0
-  cfg.geometry.room.w_glass_door_mm = 2000.0
+  cfg.geometry.room.h_wall_mm = constants.DEFAULT_WALL_HEIGHT_MM
+  cfg.geometry.room.t_gypsum_mm = constants.DEFAULT_GYPSUM_THICKNESS_MM
+  cfg.geometry.room.t_aac_mm = constants.DEFAULT_AAC_THICKNESS_MM
+  cfg.geometry.room.l_room_mm = constants.DEFAULT_ROOM_LENGTH_MM
+  cfg.geometry.room.w_room_mm = constants.DEFAULT_ROOM_WIDTH_MM
+  cfg.geometry.room.w_glass_door_mm = constants.DEFAULT_GLASS_DOOR_WIDTH_MM
   cfg.geometry.room.w_door_open_mm = point.w_door_open_mm
-  cfg.geometry.room.h_door_mm = 2100.0
+  cfg.geometry.room.h_door_mm = constants.DEFAULT_DOOR_HEIGHT_MM
 
   cfg.geometry.room.chimney.d_chimney_mm = point.d_chimney_mm
-  cfg.geometry.room.chimney.chimney_blockage_fraction = 0.08
+  cfg.geometry.room.chimney.chimney_blockage_fraction = (
+      constants.DEFAULT_CHIMNEY_BLOCKAGE_FRACTION
+  )
   cfg.geometry.room.chimney.seal_chimney_sides = True
 
   # Kiln geometry.
   cfg.geometry.kiln.s_kiln_left_mm = point.s_kiln_mm
   cfg.geometry.kiln.s_kiln_back_mm = point.s_kiln_mm
-  cfg.geometry.kiln.d_kiln_mm = 700.0
-  cfg.geometry.kiln.h_drum_mm = 595.0
-  cfg.geometry.kiln.t_lid_mm = 75.0
-  cfg.geometry.kiln.h_kiln_base_mm = 210.0
+  cfg.geometry.kiln.d_kiln_mm = constants.DEFAULT_KILN_DIAMETER_MM
+  cfg.geometry.kiln.h_drum_mm = constants.DEFAULT_KILN_DRUM_HEIGHT_MM
+  cfg.geometry.kiln.t_lid_mm = constants.DEFAULT_KILN_LID_THICKNESS_MM
+  cfg.geometry.kiln.h_kiln_base_mm = constants.DEFAULT_KILN_BASE_HEIGHT_MM
 
   # Bung geometry.
-  cfg.geometry.bung.bung_angle_deg = 0.0
-  cfg.geometry.bung.r_bung_mm = 415.0
-  cfg.geometry.bung.z_bung_offset_mm = 540.0
+  cfg.geometry.bung.bung_angle_deg = constants.DEFAULT_BUNG_ANGLE_DEG
+  cfg.geometry.bung.r_bung_mm = constants.DEFAULT_BUNG_RADIUS_MM
+  cfg.geometry.bung.z_bung_offset_mm = constants.DEFAULT_BUNG_Z_OFFSET_MM
   cfg.geometry.bung.bung_captured = point.bung_captured
 
   # SSR enclosure geometry.
-  cfg.geometry.ssr.ssr_angle_deg = -45.0
-  cfg.geometry.ssr.z_ssr_offset_mm = 100.0
-  cfg.geometry.ssr.w_ssr_mm = 190.0
-  cfg.geometry.ssr.d_ssr_mm = 146.5
-  cfg.geometry.ssr.h_ssr_mm = 430.0
+  cfg.geometry.ssr.ssr_angle_deg = constants.DEFAULT_SSR_ANGLE_DEG
+  cfg.geometry.ssr.z_ssr_offset_mm = constants.DEFAULT_SSR_Z_OFFSET_MM
+  cfg.geometry.ssr.w_ssr_mm = constants.DEFAULT_SSR_WIDTH_MM
+  cfg.geometry.ssr.d_ssr_mm = constants.DEFAULT_SSR_DEPTH_MM
+  cfg.geometry.ssr.h_ssr_mm = constants.DEFAULT_SSR_HEIGHT_MM
 
-  # Floor stack geometry (40 mm screed from recent 40screed baseline).
+  # Floor stack geometry.
   cfg.geometry.floor.d_reflector_mm = point.d_reflector_mm
   cfg.geometry.floor.t_reflector_calsil_mm = point.t_reflector_calsil_mm
   cfg.geometry.floor.g_floor_reflector_mm = point.g_floor_reflector_mm
   cfg.geometry.floor.w_floor_pad_mm = point.w_floor_pad_mm
   cfg.geometry.floor.t_floor_pad_mm = point.t_floor_pad_mm
-  cfg.geometry.floor.t_screed_mm = 40.0
-  cfg.geometry.floor.t_vip_mm = 20.0
+  cfg.geometry.floor.t_screed_mm = constants.DEFAULT_SCREED_THICKNESS_MM
+  cfg.geometry.floor.t_vip_mm = constants.DEFAULT_VIP_THICKNESS_MM
 
   # Exhaust hood geometry centered dynamically over the kiln axis.
   x_kiln_center_mm = (
@@ -344,44 +347,46 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
       + 0.5 * cfg.geometry.kiln.d_kiln_mm
   )
   cfg.geometry.hood.d_hood_inlet_mm = point.d_hood_inlet_mm
-  cfg.geometry.hood.d_hood_duct_mm = 200.0
+  cfg.geometry.hood.d_hood_duct_mm = constants.DEFAULT_HOOD_DUCT_DIAMETER_MM
   cfg.geometry.hood.z_hood_drop_mm = point.z_hood_drop_mm
   cfg.geometry.hood.x_hood_mm = x_kiln_center_mm
   cfg.geometry.hood.y_hood_mm = y_kiln_center_mm
 
   # Thermal sources, emissivities, and conductivities.
-  cfg.thermal.sources.t_internal_c = 1280.0
-  cfg.thermal.sources.t_ext_c = 20.0
+  cfg.thermal.sources.t_internal_c = constants.DEFAULT_KILN_INTERNAL_C
+  cfg.thermal.sources.t_ext_c = constants.DEFAULT_EXT_TEMP_C
   cfg.thermal.sources.u_kiln_side = point.u_kiln_side
-  cfg.thermal.sources.u_kiln_top = 2.00
+  cfg.thermal.sources.u_kiln_top = constants.DEFAULT_U_KILN_TOP
   cfg.thermal.sources.u_kiln_bot = point.u_kiln_side
-  cfg.thermal.sources.q_bung_open_w = 110.0
-  cfg.thermal.sources.q_ssr_internal_w = 18.8
+  cfg.thermal.sources.q_bung_open_w = constants.DEFAULT_Q_BUNG_OPEN_W
+  cfg.thermal.sources.q_ssr_internal_w = constants.DEFAULT_Q_SSR_INTERNAL_W
   cfg.thermal.sources.exhaust_fan_cfm = point.exhaust_fan_cfm
 
-  cfg.thermal.emissivities.eps_kiln_side = 0.60
-  cfg.thermal.emissivities.eps_kiln_top = 0.85
-  cfg.thermal.emissivities.eps_kiln_bot = 0.15
-  cfg.thermal.emissivities.eps_shield = 0.90
-  cfg.thermal.emissivities.eps_gypsum = 0.90
-  cfg.thermal.emissivities.eps_aac = 0.88
-  cfg.thermal.emissivities.eps_reflector_top = 0.15
-  cfg.thermal.emissivities.eps_ssr = 0.60
+  cfg.thermal.emissivities.eps_kiln_side = constants.DEFAULT_EPS_KILN_SIDE
+  cfg.thermal.emissivities.eps_kiln_top = constants.DEFAULT_EPS_KILN_TOP
+  cfg.thermal.emissivities.eps_kiln_bot = constants.DEFAULT_EPS_KILN_BOT
+  cfg.thermal.emissivities.eps_shield = constants.DEFAULT_EPS_SHIELD
+  cfg.thermal.emissivities.eps_gypsum = constants.DEFAULT_EPS_GYPSUM
+  cfg.thermal.emissivities.eps_aac = constants.DEFAULT_EPS_AAC
+  cfg.thermal.emissivities.eps_reflector_top = (
+      constants.DEFAULT_EPS_REFLECTOR_TOP
+  )
+  cfg.thermal.emissivities.eps_ssr = constants.DEFAULT_EPS_SSR
 
-  cfg.thermal.conductivities.k_shield = 0.175
-  cfg.thermal.conductivities.k_gypsum = 0.24
-  cfg.thermal.conductivities.k_aac = 0.13
-  cfg.thermal.conductivities.k_pad = 1.40
-  cfg.thermal.conductivities.k_screed = 1.20
-  cfg.thermal.conductivities.k_vip = 0.007
-  cfg.thermal.conductivities.u_roof = 0.18
-  cfg.thermal.conductivities.u_glass_door = 1.40
+  cfg.thermal.conductivities.k_shield = constants.DEFAULT_K_SHIELD
+  cfg.thermal.conductivities.k_gypsum = constants.DEFAULT_K_GYPSUM
+  cfg.thermal.conductivities.k_aac = constants.DEFAULT_K_AAC
+  cfg.thermal.conductivities.k_pad = constants.DEFAULT_K_PAD
+  cfg.thermal.conductivities.k_screed = constants.DEFAULT_K_SCREED
+  cfg.thermal.conductivities.k_vip = constants.DEFAULT_K_VIP
+  cfg.thermal.conductivities.u_roof = constants.DEFAULT_U_ROOF
+  cfg.thermal.conductivities.u_glass_door = constants.DEFAULT_U_GLASS_DOOR
 
   # Discretization grid.
-  cfg.grid.dx_wall_mm = 50.0
-  cfg.grid.dz_wall_mm = 50.0
-  cfg.grid.n_theta_kiln = 24
-  cfg.grid.n_z_kiln = 6
+  cfg.grid.dx_wall_mm = constants.DEFAULT_DX_WALL_MM
+  cfg.grid.dz_wall_mm = constants.DEFAULT_DZ_WALL_MM
+  cfg.grid.n_theta_kiln = constants.DEFAULT_N_THETA_KILN
+  cfg.grid.n_z_kiln = constants.DEFAULT_N_Z_KILN
 
   return cfg
 
@@ -717,28 +722,7 @@ def _extract_kiln_skin_max_c(
 
 def expected_patch_count(params: params_lib.SimParams) -> int:
   """Computes the exact number of discretized patches built for `params`."""
-  n_cols_left = max(1, int(round(params.w_shield_left / params.dx_wall)))
-  n_cols_back = max(1, int(round(params.w_shield_back / params.dx_wall)))
-  n_rows_shield = max(1, int(round(params.h_shield / params.dz_wall)))
-  n_rows_wall = max(1, int(round(params.h_wall / params.dz_wall)))
-
-  gyp_band_width = 1.0
-  x_gyp_start = params.x_shield_left_end
-  x_gyp_end = min(params.l_room, x_gyp_start + gyp_band_width)
-  w_gyp_left = max(params.dx_wall, x_gyp_end - x_gyp_start)
-  n_cols_gyp_left = max(1, int(round(w_gyp_left / params.dx_wall)))
-
-  y_gyp_start = params.y_shield_back_end
-  y_gyp_end = min(params.w_room, y_gyp_start + gyp_band_width)
-  w_gyp_back = max(params.dx_wall, y_gyp_end - y_gyp_start)
-  n_cols_gyp_back = max(1, int(round(w_gyp_back / params.dx_wall)))
-
-  return (
-      (n_cols_left + n_cols_back) * n_rows_shield
-      + (n_cols_gyp_left + n_cols_gyp_back) * n_rows_wall
-      + params.n_theta_kiln * params.n_z_kiln
-      + 6
-  )
+  return mesh_lib.expected_patch_count(params)
 
 
 def is_well_formed_output(

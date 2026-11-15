@@ -8,6 +8,7 @@ from absl import logging
 import numpy as np
 from scipy import linalg
 from src import chimney as chimney_lib
+from src import constants
 from src import mesh as mesh_lib
 from src import params as params_lib
 from src import plume_room as plume_room_lib
@@ -68,23 +69,27 @@ def compute_natural_convection_h(
   Returns:
     (N,) convective heat transfer coefficients h_c in W/(m^2*K).
   """
-  t_film = np.maximum(250.0, 0.5 * (t_surf_k + t_amb_k))
+  t_film = np.maximum(constants.SOLVER_MIN_TEMP_K, 0.5 * (t_surf_k + t_amb_k))
   beta = 1.0 / t_film
   delta_t = np.sqrt((t_surf_k - t_amb_k) ** 2 + 1e-6)
 
-  nu = 1.57e-5 * ((t_film / 300.0) ** 1.7)
-  alpha = nu / chimney_lib.AIR_PR
-  k_air = 0.0262 * ((t_film / 300.0) ** 0.8)
+  nu = constants.AIR_NU_REF_300K * (
+      (t_film / constants.AIR_T_REF_K) ** 1.7
+  )
+  alpha = nu / constants.AIR_PR
+  k_air = constants.AIR_K_REF_300K * (
+      (t_film / constants.AIR_T_REF_K) ** 0.8
+  )
 
   ra_l = (
-      params_lib.GRAVITY
+      constants.GRAVITY
       * beta
       * delta_t
       * (char_lengths_m ** 3)
       / np.maximum(nu * alpha, 1e-14)
   )
 
-  pr_term = (1.0 + (0.492 / chimney_lib.AIR_PR) ** (9.0 / 16.0)) ** (
+  pr_term = (1.0 + (0.492 / constants.AIR_PR) ** (9.0 / 16.0)) ** (
       8.0 / 27.0
   )
   nu_vert = (0.825 + (0.387 * (ra_l ** (1.0 / 6.0))) / pr_term) ** 2
@@ -106,7 +111,7 @@ def compute_natural_convection_h(
         char_lengths_m[bot_mask], 0.05
     )
 
-  return np.maximum(2.0, h_c)
+  return np.maximum(constants.H_CONV_MIN_W_M2K, h_c)
 
 
 def solve_radiosity_system(
@@ -150,14 +155,14 @@ def _solve_ssr_internal_air(
   t_ssr_case_k = float(np.sum(t_ssr_faces_k * ssr_areas) / np.sum(ssr_areas))
 
   a_ref = math.pi * (params.r_reflector ** 2)
-  h_ref = 3.5
+  h_ref = constants.H_CONV_REFLECTOR_AIR_W_M2K
   q_ref_conv = max(0.0, h_ref * a_ref * (t_ref_k - t_lower_k))
-  m_dot_local_inflow = 0.035  # kg/s
-  dt_floor_conv = q_ref_conv / (m_dot_local_inflow * chimney_lib.AIR_CP)
+  m_dot_local_inflow = constants.SSR_LOCAL_INFLOW_KG_S
+  dt_floor_conv = q_ref_conv / (m_dot_local_inflow * constants.AIR_CP)
   t_ssr_inlet_k = t_lower_k + dt_floor_conv
 
-  a_louver_eff = 0.0022  # m^2 effective free louver opening area
-  h_int_box = 5.5  # W/(m^2*K) internal wall-to-air convection
+  a_louver_eff = constants.SSR_LOUVER_EFF_AREA_M2
+  h_int_box = constants.H_CONV_SSR_INTERNAL_W_M2K
   a_box_total = float(np.sum(ssr_areas))
   ua_box = h_int_box * a_box_total
 
@@ -166,13 +171,14 @@ def _solve_ssr_internal_air(
   )
   for _ in range(8):
     dt_buoy = abs(t_air_k - t_ssr_inlet_k)
-    v_louver = 0.55 * math.sqrt(
-        2.0 * params_lib.GRAVITY * params.h_ssr * (dt_buoy / t_ssr_inlet_k)
+    v_louver = constants.SSR_LOUVER_DISCHARGE_COEFF * math.sqrt(
+        2.0 * constants.GRAVITY * params.h_ssr * (dt_buoy / t_ssr_inlet_k)
     )
     m_dot_louver = max(
-        1.2e-3, chimney_lib.AIR_RHO_REF * a_louver_eff * v_louver
+        constants.SSR_LOUVER_MIN_FLOW_KG_S,
+        constants.AIR_RHO_REF * a_louver_eff * v_louver,
     )
-    mcp = m_dot_louver * chimney_lib.AIR_CP
+    mcp = m_dot_louver * constants.AIR_CP
     t_air_new = (
         params.q_ssr_internal_w + mcp * t_ssr_inlet_k + ua_box * t_ssr_case_k
     ) / (mcp + ua_box)
@@ -261,9 +267,10 @@ def solve_thermal_system(
       + (params.t_aac / params.k_aac)
       + params_lib.R_SE_WALL
   )
-  if params.g_floor_reflector > 1e-4:
+  if params.g_floor_reflector > constants.GEOM_TOL_M:
     u_ref_down = 1.0 / (
-        (params.t_reflector_calsil / params.k_shield) + (1.0 / 3.5)
+        (params.t_reflector_calsil / params.k_shield)
+        + (1.0 / constants.H_CONV_REFLECTOR_AIR_W_M2K)
     )
   else:
     u_ref_down = 1.0 / (
@@ -281,7 +288,7 @@ def solve_thermal_system(
   u_cond_diag[kiln_bot_mask] = params.u_kiln_bot
   u_cond_diag[gypsum_mask] = u_gypsum_wall
   u_cond_diag[ref_mask] = u_ref_down
-  u_cond_diag[ssr_mask] = 5.5
+  u_cond_diag[ssr_mask] = constants.H_CONV_SSR_INTERNAL_W_M2K
 
   dt_firing = max(0.0, params.t_internal_k - params.t_ext_k)
   if (
@@ -406,7 +413,9 @@ def solve_thermal_system(
     t_back_k[ref_mask] = t_safe[ref_mask] + (
         q_cond_in[ref_mask] * (params.t_reflector_calsil / params.k_shield)
     )
-    q_cond_in[ssr_mask] = 5.5 * (t_ssr_air_k - t_safe[ssr_mask])
+    q_cond_in[ssr_mask] = (
+        constants.H_CONV_SSR_INTERNAL_W_M2K * (t_ssr_air_k - t_safe[ssr_mask])
+    )
 
     residual = q_rad_out + q_conv_out - q_cond_in
 
@@ -433,18 +442,22 @@ def solve_thermal_system(
   max_res = 1e9
   dt_room_change = 0.0
 
-  for outer_iter in range(20):
-    for inner_iter in range(60):
+  for outer_iter in range(constants.SOLVER_MAX_OUTER_ITERS):
+    for inner_iter in range(constants.SOLVER_MAX_INNER_ITERS):
       do_chimney = (inner_iter < 12) or (inner_iter % 2 == 0) or (max_res < 5.0)
       res_vec, jac_diag = _evaluate_step(t_front_k, update_chimney=do_chimney)
       max_res = float(np.max(np.abs(res_vec)))
-      if max_res < 1e-4 and do_chimney:
+      if max_res < constants.SOLVER_INNER_RES_TOL_W_M2 and do_chimney:
         break
 
       delta_t = -res_vec / np.maximum(jac_diag, 1.0)
       max_step = float(np.max(np.abs(delta_t)))
-      damping = min(1.0, 25.0 / max(max_step, 1e-9))
-      t_front_k = np.clip(t_front_k + damping * delta_t, 250.0, t_max_bound)
+      damping = min(
+          1.0, constants.SOLVER_MAX_STEP_K / max(max_step, 1e-9)
+      )
+      t_front_k = np.clip(
+          t_front_k + damping * delta_t, constants.SOLVER_MIN_TEMP_K, t_max_bound
+      )
 
     res_vec, _ = _evaluate_step(t_front_k, update_chimney=True)
     max_res = float(np.max(np.abs(res_vec)))
@@ -476,9 +489,12 @@ def solve_thermal_system(
         dt_room_change,
     )
     if (
-        max_res < 0.5
-        and dt_room_change < 0.05
-        and (outer_iter >= 1 or dt_room_change < 0.005)
+        max_res < constants.SOLVER_OUTER_RES_TOL_W_M2
+        and dt_room_change < constants.SOLVER_OUTER_TEMP_TOL_K
+        and (
+            outer_iter >= 1
+            or dt_room_change < constants.SOLVER_OUTER_FAST_TEMP_TOL_K
+        )
     ):
       converged = True
       break
