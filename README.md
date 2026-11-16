@@ -85,15 +85,21 @@ All contributions and modules in this repository adhere to the following rules:
 ### Run All Unit Tests
 
 ```bash
-bazel test //tests:all
+bazel test //tests/...
 ```
 
 ### Execute a Single Simulation Run
 
 ```bash
-bazel run //src/kiln_sim:main -- \
+bazel run //src:main -- \
     --config="$(pwd)/configs/baseline_205mm.textproto" \
     --output_dir="$(pwd)/results"
+```
+
+### Run the Parametric Sweep
+
+```bash
+bazel run //:run_sweep
 ```
 
 ### Verify Input Provenance Against Output Record

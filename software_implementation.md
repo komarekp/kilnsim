@@ -33,7 +33,7 @@ sudo apt update && sudo apt install -y \
 
 - **`python3-absl`**: Google Abseil Python application framework (`absl.app`, `absl.flags`, `absl.logging`, and `absl.testing.absltest`).  
 - **`python3-numpy`**: Vectorized array storage, coordinate geometry, and dense linear systems (`scipy.linalg.lu_factor`, `lu_solve` for the radiosity matrix).  
-- **`python3-scipy`**: 1D root-finding (`scipy.optimize.root_scalar` with Brent's method) for floor and ceiling point sensor thermal equilibria.  
+- **`python3-scipy`**: Dense linear radiosity systems (`scipy.linalg.lu_factor`, `lu_solve`), sparse 2D subfloor conduction solves (`scipy.sparse.linalg.spsolve`), and 1D root-finding (`scipy.optimize.root_scalar` with Brent's method) for point sensor equilibria.  
 - **`python3-protobuf` & `protobuf-compiler`**: Compiles `.proto` schemas and parses/serializes human-readable `.textproto` files via `google.protobuf.text_format`.  
 - **`bazel`**: Manages the hermetic build graph, `proto_library` / `py_proto_library` targets, `py_library` modules, `py_binary` entry points, and `py_test` suites.
 
@@ -78,27 +78,30 @@ kilnsim/
 +-- src/
 |   +-- BUILD.bazel               # py_library and py_binary targets for physics modules
 |   +-- __init__.py               # Top-level kiln_sim_lib package export
+|   +-- constants.py              # Single source of truth for shared physical/numerical constants
 |   +-- main.py                   # Abseil CLI entry point for single simulation execution
 |   +-- io_manager.py             # MD5 hashing, textproto serialization, and Abseil logging setup
 |   +-- params.py                 # Frozen SI-unit SimParams dataclass, validation, derived datums
 |   +-- mesh.py                   # SurfaceMesh SoA storage + PatchView single-patch query API
-|   +-- view_factors.py           # Diffuse + specular reflector view factors and sensor vectors
+|   +-- view_factors.py           # Diffuse + specular reflector VFs, ceiling & 2D floor grids
 |   +-- chimney.py                # 1D buoyant channel flow, friction, solid contact, AAC conduction
-|   +-- plume_room.py             # Corner-modified MTT plume, hood capture, 2-zone room model
-|   +-- solver.py                 # Vectorized diagonal-Newton coupled thermal-fluid solver
-|   +-- metrics.py                # Engineering safety metrics, floor/ceiling sensors, output builder
+|   +-- plume_room.py             # Corner-modified MTT plume, P-Q fan curve, doorway flooding, 2-zone room
+|   +-- solver.py                 # Vectorized diagonal-Newton coupled thermal-fluid solver + SSR baffle
+|   +-- metrics.py                # 2D subfloor + stand legs, ceiling grid, duct temp, safety flags
++-- kiln_explorer.html            # Standalone interactive 2D/3D explorer with embedded packed sweep data
 +-- run_sweep.py                  # Standalone multi-core parametric sweep generator and CSV exporter
 +-- sweep_configs/                # Generated .textproto files from parametric sweep combinations
-+-- sweep_results/                # Solved .out.textproto files from parametric sweep execution
-+-- sweep_results.csv             # Consolidated CSV table of swept parameters and safety metrics
++-- sweep_results/                # Solved .out.textproto files and consolidated sweep_results.csv
 +-- tests/
     +-- BUILD.bazel               # py_test targets for unit and integration tests
     +-- params_test.py            # Verifies vertical datum stack, derived datums, and bounds checks
     +-- mesh_test.py              # Verifies PatchView lookup by ID, 3D coordinate, and SurfaceType
-    +-- view_factors_test.py      # Verifies view factor reciprocity, disk formulas, and ray blocking
+    +-- view_factors_test.py      # Verifies view factor reciprocity, disk formulas, and ceiling/solid rays
     +-- chimney_test.py           # Verifies 1D buoyant draft, friction, flush wall, and cavity limits
-    +-- solver_test.py            # Verifies global energy conservation and Newton convergence
-    +-- run_sweep_test.py         # Verifies sweep point enumeration, logging, and reservoir sampling
+    +-- plume_room_test.py        # Verifies corner plume, blower P-Q, flooding, suction, room closure
+    +-- solver_test.py            # Verifies energy conservation, ceiling/duct metrics, SSR baffle, 2D floor
+    +-- run_sweep_test.py         # Verifies sweep point enumeration, stale cache checks, and sampling
+    +-- kiln_explorer_test.py     # Verifies kiln_explorer.html safety limits and UI parity against constants.py
 ```
 
 ---
@@ -294,6 +297,12 @@ message SimulationConfig {
     double eps_reflector_top = 5;
     // Emissivity of the sheet-metal SSR electrical enclosure.
     double eps_ssr = 6;
+    // Emissivity of the stainless steel kiln outer jacket and lid band.
+    double eps_kiln_side = 7;
+    // Emissivity of the exposed refractory firebrick top face of the kiln lid.
+    double eps_kiln_top = 8;
+    // Emissivity of the downward-facing metal foil on the kiln floor insulation plate.
+    double eps_kiln_bot = 9;
   }
 
   // Thermal conductivities (W/m*K) and envelope U-values (W/m^2*K).
@@ -452,6 +461,8 @@ message SimulationOutput {
     double t_ceiling_max_c = 26;
     // True if the peak ceiling surface temperature remains strictly below 40.0 C.
     bool ceiling_safe = 27;
+    // Mixed exhaust air temperature inside the ceiling ductwork takeoff (C).
+    double t_exhaust_duct_c = 28;
   }
 
   // Resolved thermal state of an individual discretized surface patch.
@@ -555,17 +566,18 @@ class FloorSensorPoint:
 
 | File | Key Classes / Functions | Purpose |
 | :---- | :---- | :---- |
+| `src/constants.py` | Shared physical, aerodynamic, subfloor, and UI limit constants | Single source of truth imported across physics, mesh, metrics, sweep, and parity tests. |
 | `src/main.py` | `main(argv)`, `FLAGS` (`--config`, `--output_dir`, `--output_file`) | CLI entry point (`absl.app.run`). Orchestrates configuration loading, mesh generation, view factor evaluation, coupled thermal solving, safety metric extraction, and output writing. |
 | `src/io_manager.py` | `load_simulation_config`, `write_simulation_output`, `configure_absl_logging`, `format_utc_timestamp` | Loads `.textproto` files, computes exact raw-byte MD5 digest, writes `<stem>_<YYYYMMDDTHHMMSSZ>.out.textproto`, and initializes unique per-run Abseil file logging subdirectories. |
 | `src/params.py` | `SimParams`, `from_proto`, `validate_params`, `compute_ua_upper_zone`, `compute_ua_lower_zone` | Converts protobuf parameters to SI base units, validates geometric and physical bounds, and computes derived coordinates. |
 | `src/mesh.py` | `SurfaceType`, `PatchView`, `FloorSensorPoint`, `SurfaceMesh`, `build_mesh` | Discretizes planar rectangular patches (vertex average centroids), curved kiln cylinder (on-skin polar midpoint centroids), disks, SSR faces, and point sensors for floor pad, vinyl, and ceiling. |
-| `src/view_factors.py` | `compute_view_factors`, `ViewFactorSystem`, `coaxial_parallel_disks_vf` | Evaluates diffuse view factors with ray-traced cylinder occlusion, analytical coaxial disk formulas, specular reflector virtual-image matrix $F\_{\text{mirror}}$, and sensor view factor vectors. |
+| `src/view_factors.py` | `compute_view_factors`, `compute_floor_grid_vfs`, `ceiling_sensor_points`, `ViewFactorSystem` | Evaluates diffuse view factors with ray-traced solid occlusion, specular reflector virtual-image matrix $F\_{\text{mirror}}$, 8-azimuth ceiling grid VFs, and 2D floor grid VFs. |
 | `src/chimney.py` | `solve_chimney`, `ChimneySolution`, `_solve_wall_columns` | Solves 1D buoyant channel flow, friction losses, vertical air heating $T\_{\text{ch}}(z)$, flush solid contact ($d\_{\text{chimney}} = 0$), stagnant cavity limits, and 1D AAC wall conduction. |
-| `src/plume_room.py` | `solve_plume_and_room`, `RoomSolution` | Evaluates corner-modified MTT buoyant plume ($m\_{\text{eff}}$), canopy hood capture fraction ($\eta\_{\text{plume}}$), doorway buoyancy exchange, and two-zone room air temperatures ($T\_{\text{room,upper}}, T\_{\text{room,lower}}$). |
-| `src/solver.py` | `solve_thermal_system`, `SolverSolution`, `solve_radiosity_system` | Vectorized diagonal-Newton solver with exact analytical derivatives $dR\_m/dT\_m$, pre-factored LU radiosity solve, and coupled outer room convergence loop. |
-| `src/metrics.py` | `compute_safety_metrics`, `build_simulation_output`, `_solve_floor_sensor_temp_k` | Solves point sensor thermal equilibria (pad edge, outside VIP, vinyl edge, ceiling), evaluates pass/fail thresholds, and populates `SimulationOutput`. |
+| `src/plume_room.py` | `solve_plume_and_room`, `_duct_quadratic_resistance`, `RoomSolution` | Evaluates corner-modified MTT plume with 65% `KILN_BOTTOM` entrainment, parabolic P–Q blower curve with duct losses, hood rim suction reach, doorway Froude flooding suppression, and two-zone room balance. |
+| `src/solver.py` | `solve_thermal_system`, `SolverSolution`, `solve_radiosity_system`, `_solve_ssr_internal_air` | Vectorized diagonal-Newton solver with exact analytical derivatives $dR\_m/dT\_m$, pre-factored LU radiosity solve, 4th SSR wall + standoff radiation baffle, sub-kiln louver air heating, and coupled outer room convergence loop. |
+| `src/metrics.py` | `compute_safety_metrics`, `build_simulation_output`, `_solve_floor_2d_field`, `_solve_ceiling_sensors_vec_k` | Solves 2D lateral subfloor conduction + 4 steel kiln stand leg 1D fin bridges, evaluates full ceiling grid with Alpert/chimney decay, computes `t_exhaust_duct_c`, and populates `SimulationOutput`. |
 | `run_sweep.py` | `SweepPoint`, `enumerate_sweep_points`, `_run_geometry_group`, `reservoir_sample_points` | Parallel parametric sweep driver with `ProcessPoolExecutor`, mesh and view factor caching across runs sharing `geometry_cache_key`, reservoir sampling (`--quick`), and CSV generation (`--csv_output`). |
-| `tests/` | Unit and integration test suite | Comprehensive test coverage across all modules (`params_test.py`, `mesh_test.py`, `view_factors_test.py`, `chimney_test.py`, `solver_test.py`, `run_sweep_test.py`). |
+| `tests/` | Unit and integration test suite | Comprehensive test coverage across all modules (`params_test.py`, `mesh_test.py`, `view_factors_test.py`, `chimney_test.py`, `plume_room_test.py`, `solver_test.py`, `run_sweep_test.py`, `kiln_explorer_test.py`). |
 
 ---
 
@@ -575,15 +587,17 @@ class FloorSensorPoint:
 
 ```sh
 # Run all unit and integration tests
-bazel test //tests:all
+bazel test //tests/...
 
 # Run specific individual test targets
 bazel test //tests:params_test
 bazel test //tests:mesh_test
 bazel test //tests:view_factors_test
 bazel test //tests:chimney_test
+bazel test //tests:plume_room_test
 bazel test //tests:solver_test
 bazel test //tests:run_sweep_test
+bazel test //tests:kiln_explorer_test
 ```
 
 ### 2\. Execute a Single Simulation Run
@@ -608,11 +622,11 @@ bazel run //:run_sweep -- --quick
 # Generate sweep configuration .textproto files without running solver
 bazel run //:run_sweep -- --configs_only
 
-# Full parametric sweep across all combinations using 8 parallel worker processes
-bazel run //:run_sweep -- --jobs=8
+# Full parametric sweep across all combinations using default CPU worker count
+bazel run //:run_sweep
 
 # Aggregate existing .out.textproto files into summary CSV without re-running
-bazel run //:run_sweep -- --csv_only --csv_output="$(pwd)/sweep_results.csv"
+bazel run //:run_sweep -- --csv_only --csv_output="$(pwd)/sweep_results/sweep_results.csv"
 ```
 
 &nbsp;

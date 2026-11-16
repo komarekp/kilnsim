@@ -110,13 +110,13 @@ The studio subfloor below $z = 0$ consists of a 150 mm structural concrete slab,
 | $s\_{\text{kiln,left}}$ \newline `s_kiln_left_mm` | 205.0 | $\ge 100.0$ | mm | Clear horizontal standoff from left shield front face to kiln jacket. |
 | $s\_{\text{kiln,back}}$ \newline `s_kiln_back_mm` | 205.0 | $\ge 100.0$ | mm | Clear horizontal standoff from back shield front face to kiln jacket. |
 | $D\_{\text{kiln}}$ \newline `d_kiln_mm` | 700.0 | 400.0 to 1200.0 | mm | Outer diameter of stainless steel kiln cylinder jacket. |
-| $H\_{\text{drum}}$ \newline `h_drum_mm` | 580.0 | 300.0 to 1000.0 | mm | Height of main kiln cylinder body excluding lid. |
-| $t\_{\text{lid}}$ \newline `t_lid_mm` | 105.0 | 50.0 to 200.0 | mm | Thickness of closed refractory kiln lid. |
+| $H\_{\text{drum}}$ \newline `h_drum_mm` | 595.0 | 300.0 to 1000.0 | mm | Height of main kiln cylinder body excluding lid. |
+| $t\_{\text{lid}}$ \newline `t_lid_mm` | 75.0 | 50.0 to 200.0 | mm | Thickness of closed refractory kiln lid. |
 | $h\_{\text{kiln\_base}}$ \newline `h_kiln_base_mm` | 210.0 | $\ge 50.0$ | mm | Clear height from floor pad top ($z\_{\text{pad,top}}$) to kiln drum bottom plate. |
 | $T\_{\text{int}}$ \newline `t_internal_c` | 1280.0 | 800.0 to 1350.0 | deg C | Steady-state internal firing temperature (Cone 10 firing). |
 | $U\_{\text{kiln,side}}$ \newline `u_kiln_side` | 0.80 | 0.40 to 2.50 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of composite kiln wall ($0.80\ \text{W/m}^2\text{K}$ gives $\sim 155^\circ\text{C}$ skin). |
 | $U\_{\text{kiln,top}}$ \newline `u_kiln_top` | 2.00 | 0.80 to 4.00 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of unbacked refractory brick lid. |
-| $U\_{\text{kiln,bot}}$ \newline `u_kiln_bot` | 2.00 | 0.80 to 4.00 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of kiln bottom floor slab. |
+| $U\_{\text{kiln,bot}}$ \newline `u_kiln_bot` | 0.80 | 0.40 to 4.00 | $\text{W/m}^2\text{K}$ | Effective thermal transmittance of kiln bottom floor slab. |
 | $\theta\_{\text{bung}}$ \newline `bung_angle_deg` | 0.0 | -180.0 to 180.0 | deg | Azimuthal angle of exhaust bung ($0^\circ$ faces sliding doors along +x). |
 | $r\_{\text{bung}}$ \newline `r_bung_mm` | 415.0 | $\ge D\_{\text{kiln}}/2$ | mm | Radial distance from kiln axis to dilution cup center. |
 | $z\_{\text{bung\_offset}}$ \newline `z_bung_offset_mm` | 540.0 | 0.0 to $H\_{\text{drum}}$ | mm | Vertical height from kiln bottom plate to open top rim of dilution cup. |
@@ -259,61 +259,63 @@ The simulator resolves all three possible physical regimes in the behind-shield 
    - Convective air heating and solid AAC conduction are solved stepwise upward along each column:
      $$\dot{m}'\_{\text{ch}} c\_p \frac{dT\_{\text{ch}}}{dz} = h\_{\text{ch}} \left( T\_{\text{shield,back}}(z) - T\_{\text{ch}}(z) \right) + h\_{\text{ch}} \left( T\_{\text{aac,front}}(z) - T\_{\text{ch}}(z) \right)$$
 
-### 4.4 Floor Reflector, Under-Pan Air Gap, and Subfloor VIP Interface
+### 4.4 2D Subfloor Lateral Conduction, Reflector Gap & Stand Leg Bridging
 
-To evaluate thermal protection of the subfloor VIP layer ($z = -t\_{\text{screed}}$) and surrounding vinyl ($z = 0$), the model solves three coupled floor zones:
+To evaluate thermal protection of the subfloor VIP layer ($z = -t\_{\text{screed}}$) and surrounding vinyl ($z = 0$) including lateral heat spreading over the low-$k$ VIP barrier ($\lambda \sim 0.47\text{ m}$), the model solves a coupled 2-layer finite-volume 2D cartesian grid (`_solve_floor_2d_field`, $75\text{ mm}$ cells covering pad plus $0.35\text{ m}$ vinyl margin via `scipy.sparse.linalg.spsolve`) alongside the coupled 1D under-reflector column (`solve_under_reflector_column`):
 
-1. **Center of Kiln / Under-Reflector Zone ($r \le D\_{\text{reflector}}/2$):**
-   - Solved via a unified 1D multi-node thermal column (`solve_under_reflector_column`) shared by both the coupled Newton solver and post-processing metrics.
-   - The top reflector face ($z = z\_{\text{reflector,top}}$) conducts through $t\_{\text{reflector\_calsil}}/k\_{\text{shield}}$ to the pan underside node ($T\_{\text{ref,bot}}$). When $g\_{\text{floor\_reflector}} = 0$, the pan underside conducts directly into the floor pad center node ($T\_{\text{pad,center}}$) and subfloor VIP; when $g\_{\text{floor\_reflector}} > 0$, parallel natural convection ($h\_{\text{conv}} = 3.0\ \text{W/m}^2\text{K}$ to $T\_{\text{lower}}$) and across-gap radiation (using $\varepsilon\_{\text{shield}}$ when CalSil-backed or $\varepsilon\_{\text{reflector}}$ when bare stainless steel) cool the underside before reaching the floor pad center.
-2. **Floor Pad Outside Reflector Rim:**
-   - Evaluates point sensors on the exposed tile/pad along the corner diagonal (`pad_edge_corner`) and room diagonal (`pad_edge_room`), plus a dense radial candidate grid spanning the reflector optical shadow and penumbra up to the floor pad edge (`pad_outside_corner_*`, `pad_outside_room_*`).
-   - Each sensor solves the local radiative-convective-conductive equilibrium:
-     $$\varepsilon\_{\text{pad}} G\_{\text{inc}} - \varepsilon\_{\text{pad}} \sigma T\_{\text{pad}}^4 - h\_c (T\_{\text{pad}} - T\_{\text{lower}}) - \frac{T\_{\text{pad}} - T\_{\text{ext}}}{\frac{t\_{\text{floor\_pad}}}{k\_{\text{pad}}} + \frac{t\_{\text{screed}}}{k\_{\text{screed}}} + \frac{t\_{\text{vip}}}{k\_{\text{vip}}}} = 0$$
-   - The corresponding peak VIP temperature directly below this point is evaluated via:
-     $$T\_{\text{vip,outside}} = T\_{\text{ext}} + (T\_{\text{pad,edge,max}} - T\_{\text{ext}}) \frac{R\_{\text{vip}}}{R\_{\text{pad}} + R\_{\text{screed}} + R\_{\text{vip}}}$$
-3. **Vinyl Edge Sensors:**
-   - Evaluates sensors at $(W\_{\text{floor\_pad}} + 5\text{ mm}, y\_k, 0)$ and $(x\_k, W\_{\text{floor\_pad}} + 5\text{ mm}, 0)$ on the vinyl flooring resting directly on the screed, verifying compliance against the 45.0  deg C threshold.
+1. **Under-Reflector Gap & Kiln Stand Legs ($r \le D\_{\text{reflector}}/2$):**
+   - The coupled solver uses `solve_under_reflector_column`: the top reflector face ($z = z\_{\text{reflector,top}}$) conducts through $t\_{\text{reflector\_calsil}}/k\_{\text{shield}}$ to the pan underside node ($T\_{\text{ref,bot}}$). When $g\_{\text{floor\_reflector}} = 0$, the pan underside conducts directly into the floor pad; when $g\_{\text{floor\_reflector}} > 0$, parallel natural convection ($h\_{\text{conv}} = 3.0\ \text{W/m}^2\text{K}$ to $T\_{\text{lower}}$) and across-gap radiation (using $\varepsilon\_{\text{shield}}$ when CalSil-backed or $\varepsilon\_{\text{reflector}}$ when bare stainless steel) couple across the gap.
+   - Four inset steel kiln stand legs at radius $r\_{\text{leg}} = 0.55 R\_{\text{kiln}}$ ($\phi = \pm 45^\circ, \pm 135^\circ$) are modeled as 1D convective fins ($k = 25\ \text{W/m}\cdot\text{K}$, $A = 1.5\times 10^{-4}\ \text{m}^2$, $P = 0.14\text{ m}$, $h\_{\text{eff}} = 18\ \text{W/m}^2\text{K}$, foot contact $R\_c = 4.0\ \text{K/W}$) conducting heat from the lower kiln jacket flange directly into the floor pad surface nodes.
+   - `t_floor_pad_under_reflector_c` and `t_vip_under_reflector_c` report the maximum pad top and VIP barrier film temperatures in the sub-kiln core ($r \le 0.58 \min(R\_{\text{kiln}}, R\_{\text{reflector}})$).
+2. **Exposed Pad Outside Reflector & Continuous Screed Lateral Spreading:**
+   - Every exposed floor grid cell ($r > R\_{\text{reflector}}$) evaluates pre-computed ray-traced enclosure view factors (`compute_floor_grid_vfs`) to walls, kiln cylinder, and occluded finite `KILN_BOTTOM` disk, applying lateral pad conductance ($k\_{\text{pad}} t\_{\text{floor\_pad}}$) inside $[0, W\_{\text{floor\_pad}}]^2$ and continuous screed conductance ($k\_{\text{screed}} t\_{\text{screed}}$) across the entire pad-plus-vinyl domain down through $R\_{\text{vip}}$ to $T\_{\text{ext}}$.
+   - `t_floor_pad_edge_c` and `t_vip_outside_reflector_c` report the peak pad and VIP temperatures outside the reflector radius (`r > r_reflector`).
+3. **Surrounding Vinyl Flooring ($x > W\_{\text{floor\_pad}}$ or $y > W\_{\text{floor\_pad}}$):**
+   - `t_vinyl_edge_c` reports the peak surface temperature across all vinyl cells outside the square pad boundary (accounting for both direct radiation and lateral screed heat bleed across the pad boundary), verified against the $45.0^\circ\text{C}$ limit.
 
 ### 4.5 Corner-Modified Plume & Active Hood Capture
 
 1. **Total Convective Plume Heat Release:**
-   $$\dot{Q}\_{\text{plume}} = \dot{Q}\_{\text{conv,cyl}} + \dot{Q}\_{\text{conv,lid}} + (1 - \text{bung}\_{\text{cap}}) \dot{Q}\_{\text{bung}}$$
+   $$\dot{Q}\_{\text{plume}} = \dot{Q}\_{\text{conv,cyl}} + \dot{Q}\_{\text{conv,lid}} + 0.65 \dot{Q}\_{\text{conv,bot}} + (1 - \text{bung}\_{\text{cap}}) \dot{Q}\_{\text{bung}}$$
+   where $65\%$ of upward-buoyant under-kiln bottom convection sweeps radially outward around the cylinder to join the rising plume, and the remaining $35\%$ heats the lower room zone.
 2. **Virtual Origin & Standoff Image Multiplier ($m\_{\text{eff}}$):**
    - Virtual origin of the finite area source:
      $$z\_v = z\_{\text{kiln,top}} - 1.02 D\_{\text{kiln}} + 0.083 \left( \frac{\dot{Q}\_{\text{plume}}}{1000} \right)^{2/5}$$
-   - Let $r\_p(\Delta z) = 0.12 \Delta z\_{\text{plume}}$ be the half-width Gaussian plume scale at height $\Delta z\_{\text{plume}} = \max(0.05, z\_{\text{hood,inlet}} - z\_v)$, and let $w\_{\text{left}} = \exp(-(s\_{\text{left}}/r\_p)^2)$ and $w\_{\text{back}} = \exp(-(s\_{\text{back}}/r\_p)^2)$ be smooth wall-proximity weights from the kiln drum edge to each wall. The smooth corner image factor is:
-     $$m\_{\text{eff}} = (1 + w\_{\text{left}})(1 + w\_{\text{back}}) \in [1, 4]$$
-3. **Plume Flow, Capture Radius & Makeup-Air Fan Throttling:**
-   - 95% Gaussian plume radius at hood mouth: $r\_{\text{plume,95}} = 1.65 (0.12 \Delta z\_{\text{plume}}) + d\_{\text{offset}}$.
-   - Mowrer-Williamson corner-modified plume entrainment rate:
-     $$\dot{V}\_{\text{plume}} = \frac{\dot{m}\_{\text{plume}}}{\rho\_{\text{plume}}}, \quad \dot{m}\_{\text{plume}} = 0.071 \dot{Q}\_{\text{plume,kW}}^{1/3} \Delta z\_{\text{plume}}^{5/3} m\_{\text{eff}}^{-2/3} + 0.018 \dot{Q}\_{\text{plume,kW}}^{1/3} D\_{\text{kiln}}$$
-   - Effective exhaust fan volumetric flow $\dot{V}\_{\text{fan,eff}}$ accounts for room makeup-air starvation when the doorway gap $W\_{\text{door\_open}}$ narrows, balancing fan curve static head ($\Delta P\_{\text{fan,max}} = 250\ \text{Pa}$) against orifice resistance through the ajar doorway plus background room infiltration area ($A\_{\text{infil}} = 0.005\ \text{m}^2$).
-4. **Hood Capture Fraction ($\eta\_{\text{plume}}$) and Full Capture Flag:**
-   - Radial Gaussian capture overlap with effective hood capture reach $R\_{\text{cap}} = \max(0, R\_{\text{hood}} - d\_{\text{offset}})$ and plume spread $\sigma\_r = 0.12 \Delta z\_{\text{plume}} / \sqrt{2}$:
-     $$\eta\_{\text{geom}} = \frac{1 - \exp\!\left(-\frac{1}{2}(R\_{\text{cap}}/\sigma\_r)^2\right)}{1 - \exp\!\left(-\frac{1}{2}(1.65\sqrt{2})^2\right)} \quad (\text{clamped to } 1.0 \text{ when } R\_{\text{hood}} \ge r\_{\text{plume,95}})$$
-   - Volumetric capacity fraction: $\eta\_{\text{vol}} = \min(1.0, \dot{V}\_{\text{fan,eff}} / \dot{V}\_{\text{plume}})$.
-   - Combined capture fraction: $\eta\_{\text{plume}} = \eta\_{\text{geom}} \eta\_{\text{vol}}$.
+   - Let $s\_{\text{eff}} = \min(s\_{\text{left}}, s\_{\text{back}}) + R\_{\text{kiln}}$ and Gaussian half-width $b = 0.12 \Delta z\_{\text{plume}}$ at $\Delta z\_{\text{plume}} = \max(0.15, z\_{\text{hood,inlet}} - z\_v)$. The Hasemi / Mowrer-Williamson corner standoff factor is:
+     $$m\_{\text{eff}} = 1 + 3 \exp\!\left( -\left(\frac{s\_{\text{eff}}}{\max(b, 10^{-3})}\right)^2 \right) \in [1, 4]$$
+3. **Plume Flow, Blower $P\text{--}Q$ Curve & Duct/Makeup-Air Throttling:**
+   - 95% Gaussian plume radius at hood mouth: $r\_{\text{plume,95}} = 1.65 b + d\_{\text{offset}}$ (plus $0.35 \max(0, r\_{\text{bung}} - R\_{\text{kiln}})$ if `bung_captured = false`).
+   - Corner-modified MTT plume entrainment rate:
+     $$\dot{V}\_{\text{plume}} = \frac{\dot{m}\_{\text{plume}}}{\rho\_{\text{plume}}}, \quad \dot{m}\_{\text{plume}} = \frac{0.071 (\dot{Q}\_{\text{plume,kW}} m\_{\text{eff}})^{1/3} \Delta z\_{\text{plume}}^{5/3} + 0.018 (\dot{Q}\_{\text{plume,kW}} m\_{\text{eff}})^{1/3} D\_{\text{kiln}}}{m\_{\text{eff}}}$$
+   - Effective exhaust fan volumetric flow $\dot{V}\_{\text{fan,eff}}$ solves the parabolic blower $P\text{--}Q$ curve ($\Delta P\_{\text{fan,max}} = 250\ \text{Pa}$) against room makeup-air resistance ($R\_{\text{makeup}}$ through $A\_{\text{infil}} = 0.005\ \text{m}^2$ plus ajar doorway $0.65 W\_{\text{door\_open}} H\_{\text{door}}$) and hood entry, friction, and exit duct losses $\Delta R\_{\text{duct}}(D\_{\text{duct}}, R\_{\text{hood}}) = R\_{\text{duct}} - R\_{\text{duct,ref}}$ calibrated at reference $\varnothing 200\text{ mm}$ ducting ($K\_{\text{entry}} = 0.25, f L\_{\text{eq}}/D = 0.020 \times 3.0 / D\_{\text{duct}}, K\_{\text{exit}} = 1.0$).
+4. **Hood Rim Suction Reach, Capture Fraction ($\eta\_{\text{plume}}$) & Full Capture Flag:**
+   - Surplus blower suction pulls outer plume streamlines inward toward the skirt opening, extending the effective capture radius smoothly beyond the physical hood radius:
+     $$r\_{\text{cap,eff}} = R\_{\text{hood}} \left( 1 + \min\!\left(0.60, \; 0.22 \sqrt{\max\!\left(0, \frac{\dot{V}\_{\text{fan,eff}} - \dot{V}\_{\text{plume}}}{\max(\dot{V}\_{\text{plume}}, 10^{-6})}\right)}\right) \right)$$
+   - Radial Gaussian capture overlap ($C^0$ continuous at $r\_{\text{cap,eff}} = r\_{\text{plume,95}}$):
+     $$\eta\_{\text{geom}} = \min\!\left(1.0, \; \frac{1 - \exp\!\left(-\frac{1}{2}(r\_{\text{cap,eff}}/\sigma\_r)^2\right)}{1 - \exp\!\left(-\frac{1}{2}(2.45)^2\right)}\right), \quad \sigma\_r = \frac{r\_{\text{plume,95}}}{2.45}$$
+   - Volumetric capacity fraction: $\eta\_{\text{vol}} = \min(1.0, \dot{V}\_{\text{fan,eff}} / \dot{V}\_{\text{plume}})$, giving $\eta\_{\text{plume}} = \eta\_{\text{geom}} \eta\_{\text{vol}}$.
    - Full capture boolean flag:
-     $$\text{plume\_fully\_captured} = \left( \dot{V}\_{\text{fan,eff}} \ge \dot{V}\_{\text{plume}} \right) \land \left( R\_{\text{hood}} \ge r\_{\text{plume,95}} \right)$$
+     $$\text{plume\_fully\_captured} = \left( \dot{V}\_{\text{fan,eff}} \ge \dot{V}\_{\text{plume}} \right) \land \left( r\_{\text{cap,eff}} \ge r\_{\text{plume,95}} \right)$$
 5. **Behind-Shield Chimney Capture Fraction ($\eta\_{\text{chimney}}$):**
    - Modeled via surplus extraction capacity $\dot{V}\_{\text{surplus}} = \max(0, \dot{V}\_{\text{fan,eff}} - \eta\_{\text{plume}} \dot{V}\_{\text{plume}})$, potential sink velocity $v\_{\text{sink}}$, and chimney vertical exit jet momentum.
 
 ### 4.6 Two-Zone Room Enclosure, Stratification & Ajar Doorway Balance
 
-The two-zone room energy balance conserves total studio enthalpy across uncaptured plume $(1 - \eta\_{\text{plume}})\dot{Q}\_{\text{plume}}$, uncaptured chimney $(1 - \eta\_{\text{chimney}})\dot{Q}\_{\text{chimney}}$, non-plume front-face convection (`GYPSUM_*`, `SHIELD_*`, `REFLECTOR_TOP`, `SSR_BOX`), far-field room radiation $\dot{Q}\_{\text{rad,room}}$, uncaptured SSR louver heat $\dot{Q}\_{\text{SSR,louver}}$, and under-reflector gap convection $\dot{Q}\_{\text{under\_ref}}$:
+The two-zone room energy balance conserves total studio enthalpy across uncaptured plume $(1 - \eta\_{\text{plume}})\dot{Q}\_{\text{plume}}$, uncaptured chimney $(1 - \eta\_{\text{chimney}})\dot{Q}\_{\text{chimney}}$, non-plume front-face convection (`GYPSUM_*`, `SHIELD_*`, `REFLECTOR_TOP`, `SSR_BOX`, and $35\%$ of `KILN_BOTTOM`), far-field room radiation $\dot{Q}\_{\text{rad,room}}$, uncaptured SSR louver heat $\dot{Q}\_{\text{SSR,louver}}$, and under-reflector gap convection $\dot{Q}\_{\text{under\_ref}}$:
 1. **Stratification Interface Height ($z\_{\text{layer}}$):** Determined from doorway buoyancy neutral plane and spill rate $\dot{m}\_{\text{spill}}$.
-2. **Doorway Buoyancy Exchange:**
-   $$\dot{m}\_{\text{door}} = \frac{1}{2} \rho\_\infty W\_{\text{door\_open}} (H\_{\text{door}} - z\_{\text{layer}}) \cdot 0.65 \sqrt{g (H\_{\text{door}} - z\_{\text{layer}}) \frac{T\_{\text{upper}} - T\_{\text{ext}}}{T\_{\text{ext}}}}$$
-3. **Coupled Zone Temperatures ($T\_{\text{room,upper}}, T\_{\text{room,lower}}$):**
+2. **Doorway Buoyancy Exchange with Counterflow Flooding Suppression:**
+   - Mean inward makeup draft velocity $v\_{\text{in}} = \dot{V}\_{\text{fan,eff}} / (W\_{\text{door\_open}} H\_{\text{door}})$ opposes warm upper-zone backflow out the top of the doorway, suppressing exchange quadratically up to the critical densimetric Froude flooding limit ($v\_{\text{crit}} = 0.55 \sqrt{g (H\_{\text{door}} - z\_{\text{layer}}) (T\_{\text{upper}} - T\_{\text{ext}}) / T\_{\text{ext}}}$):
+     $$\dot{m}\_{\text{door}} = \frac{1}{2} \rho\_\infty W\_{\text{door\_open}} (H\_{\text{door}} - z\_{\text{layer}}) \cdot 0.65 v\_{\text{buoy}} \cdot \max\!\left(0, \; 1 - \left(\frac{v\_{\text{in}}}{v\_{\text{crit}}}\right)^2\right)$$
+3. **Coupled Zone Temperatures ($T\_{\text{room,upper}}, T\_{\text{room,lower}}$) & Exhaust Duct Temperature:**
    - Solved simultaneously via exact $2\times 2$ energy closure balancing zone heat inputs against envelope conductances $(UA)\_{\text{upper}}$, $(UA)\_{\text{lower}}$ and airflow advection through the doorway, infiltration, and effective hood fan extraction $\dot{V}\_{\text{fan,eff}}$.
+   - Mixed exhaust duct temperature at the ceiling takeoff (`t_exhaust_duct_c`) combines captured plume enthalpy, captured chimney enthalpy, aspirated lower/upper room air enthalpy, and teed bung heat $\dot{Q}\_{\text{bung}}$ when `bung_captured = true`.
 4. **Ceiling & Bare-AAC Gap Point Temperature Verification:**
-   - Evaluates downward-facing ceiling sensors (`ceiling_hood_rim_corner`, `ceiling_hood_rim_room`, `ceiling_chimney_corner`) using stability-aware horizontal convection correlations ($h\_c \propto |\Delta T|^{0.20}$ when heated above a cooler air layer), adding local ceiling mixing from both uncaptured primary plume spill ($25\%$) and uncaptured chimney jet ($35\%$).
+   - Evaluates a full 8-azimuth radial ceiling sensor grid at $z = H\_{\text{wall}}$ outside the hood duct cutout (`ceiling_grid_*`), hood optical umbra/penumbra boundaries (`ceiling_penumbra_*`), legacy rim/corner points (`ceiling_hood_rim_*`, `ceiling_chimney_corner`), and left/back chimney exit strips (`ceiling_chimney_strip_*`) using stability-aware horizontal convection ($h\_c \propto |\Delta T|^{0.20}$), adding Alpert radial $r^{-2/3}$ decaying uncaptured plume spill ($35\%$ peak mixing at rim) and exponentially decaying chimney exit heating feeding `t_ceiling_max_c`.
    - Evaluates bare corner AAC block exposed in any non-zero `g_floor` or `g_ceil` strip at $\Delta z\_{\text{wall}}$-subdivided heights (`aac_gap_floor_*`, `aac_gap_ceil_*`) including shield ray occlusion and vertical natural convection, feeding the peak `t_aac_max_c` metric.
 
-### 4.7 SSR Enclosure Lumped Thermal Model
+### 4.7 SSR Enclosure Lumped Thermal Model & Radiation Baffle
 
-The louvered SSR enclosure at $\theta\_{\text{SSR}} = -45^\circ$ exchanges radiation across its exposed outer rear and side faces with the kiln jacket, left shield, floor reflector, and room. Internally, air enters the bottom louvers driven by buoyancy from internal Joule heating $\dot{Q}\_{\text{SSR,int}} = 18.8\text{ W}$ and inward housing conduction, solving simultaneously for the outer casing temperature $T\_{\text{SSR,case}}$ and internal relay air temperature $T\_{\text{SSR,air}}$.
+The louvered SSR enclosure at $\theta\_{\text{SSR}} = -45^\circ$ exchanges radiation across its 3 exposed outer faces (rear + 2 side flanges) with the kiln jacket, left shield, floor reflector, and room, plus an analytical 4th kiln-facing rear wall coupled across a ventilated sheet-metal mounting standoff radiation baffle ($h\_{\text{baf}} = 6.5\ \text{W/m}^2\text{K}$) to the kiln jacket sectors facing $\theta\_{\text{SSR}}$. Internally, air preheated by both floor-reflector convection and $50\%$ of sub-kiln `KILN_BOTTOM` convection enters the bottom louvers driven by buoyancy from internal Joule heating $\dot{Q}\_{\text{SSR,int}} = 18.8\text{ W}$ and 4-wall housing conduction, solving simultaneously for the 4-face casing temperature $T\_{\text{SSR,case}}$ and internal relay air temperature $T\_{\text{SSR,air}}$.
 
 ---
 
@@ -356,8 +358,9 @@ The louvered SSR enclosure at $\theta\_{\text{SSR}} = -45^\circ$ exchanges radia
    |     |-- Synchronize undamped (T_upper, T_lower, z_layer) to room_sol, polish inner Newton to < 1e-4 W/m^2, and re-solve room once (twice if shift > 1e-4)
 
 [Stage 5: Post-Processing & Safety Metrics]
-   |-- Solve floor sensor point temperatures (pad under/edge, outside VIP, vinyl edge)
-   |-- Solve ceiling sensor (stability-aware convection + plume/chimney spill) & bare-AAC gap sensor temperatures
+   |-- Solve 2D planar pad+screed+VIP+4-leg subfloor conduction field via sparse Newton solve
+   |-- Solve full 8-azimuth radial + umbra/penumbra + chimney ceiling grid and bare-AAC gap sensors
+   |-- Compute mixed exhaust duct takeoff temperature t_exhaust_duct_c (with teed bung load if captured)
    |-- Extract peak metrics, evaluate safety flags, and assemble SimulationOutput protobuf
 ```
 
@@ -396,3 +399,4 @@ Every simulation run evaluates and outputs the following telemetry metrics again
 | `delta_t_kiln_skin_c` | Circumferential peak-to-minimum jacket temperature difference around kiln | Diagnostic ( deg C) | Quantifies back-radiation jacket heating asymmetry from corner shields. |
 | `t_ceiling_max_c` | Peak surface temperature on overhead ceiling at $z = H\_{\text{wall}}$ | $< 40.0^\circ\text{C}$ | Thermal degradation of ceiling plasterboard above kiln and chimney. |
 | `ceiling_safe` | Boolean flag: true if `t_ceiling_max_c < 40.0` | `true` | Ceiling fire/thermal protection limit. |
+| `t_exhaust_duct_c` | Mixed exhaust air temperature inside ceiling duct takeoff (including teed bung if captured) | Diagnostic ( deg C) | Evaluates exhaust duct temperature and inline blower thermal exposure. |
