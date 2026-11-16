@@ -37,12 +37,12 @@ def _extract_explorer_script(html_text: str) -> str:
       flags=re.MULTILINE,
   )
   startup_tail = (
-      "setupControls();\nsyncControlButtons();\nrenderElevation();"
+      "loadStateFromUrl();\nsetupControls();\nsyncControlButtons();\n"
+      "syncUrlFromState();\nrenderElevation();"
   )
   if not script.strip().endswith(startup_tail):
     raise AssertionError("Unexpected startup footer in kiln_explorer.html")
-  script = script[: script.rfind(startup_tail)]
-  return script
+  return script[: script.rfind(startup_tail)]
 
 
 def _run_explorer_js(scenarios: dict[str, dict[str, object]]) -> dict[str, object]:
@@ -221,6 +221,176 @@ class KilnExplorerSafetyTest(unittest.TestCase):
       self.assertFalse(
           scenarios["aac_bad"][view]["sidebar"]["Calsil Shield / AAC Max"]
       )
+
+  def test_url_parameter_parsing_and_button_click_url_updates(self) -> None:
+    html_text = _find_kiln_explorer_path().read_text(encoding="utf-8")
+    core_script = _extract_explorer_script(html_text)
+    button_groups = {
+        "ctrl-view": ["side", "front", "plan"],
+        "ctrl-skiln": ["200", "300"],
+        "ctrl-ukiln": ["0.8", "0.5", "0.3"],
+        "ctrl-fan": ["350", "400", "450"],
+        "ctrl-hood": ["600", "700", "800"],
+        "ctrl-hdrop": ["150", "400", "600"],
+        "ctrl-dref": ["0", "800"],
+        "ctrl-gref": ["0", "20"],
+        "ctrl-tref": ["0", "10"],
+        "ctrl-tpad": ["0", "20"],
+        "ctrl-door": ["0", "150"],
+    }
+    harness = f"""
+const __elements = {{
+  'elevation-svg': {{ innerHTML: '', setAttribute() {{}} }},
+  'header-subtitle': {{ textContent: '' }},
+  'drag-hint-msg': {{ textContent: '' }},
+  'plume-summary': {{ textContent: '' }},
+  'metric-list': {{ innerHTML: '' }},
+}};
+const __buttonSpec = {json.dumps(button_groups)};
+const __buttonMap = {{}};
+for (const [gid, vals] of Object.entries(__buttonSpec)) {{
+  __buttonMap[gid] = vals.map(v => ({{
+    dataset: {{ val: v }},
+    disabled: false,
+    _active: false,
+    _handlers: {{}},
+    classList: {{ toggle(cls, on) {{ if (cls === 'active') this._active = Boolean(on); }} }},
+    addEventListener(ev, fn) {{ this._handlers[ev] = fn; }},
+    click() {{ if (this._handlers.click) this._handlers.click(); }},
+  }}));
+}}
+globalThis.document = {{
+  getElementById(id) {{
+    if (!__elements[id] && id.startsWith('lbl-')) {{
+      __elements[id] = {{ textContent: '' }};
+    }}
+    return __elements[id] || null;
+  }},
+  querySelectorAll(sel) {{
+    const m = /^#([a-z-]+) button$/.exec(sel);
+    return m && __buttonMap[m[1]] ? __buttonMap[m[1]] : [];
+  }},
+}};
+const __replaceCalls = [];
+globalThis.window = globalThis;
+globalThis.window.location = {{ pathname: '/kiln_explorer.html', search: '', hash: '' }};
+globalThis.window.history = {{
+  replaceState(_s, _t, url) {{
+    __replaceCalls.push(url);
+    const qIdx = url.indexOf('?');
+    globalThis.window.location.search = qIdx >= 0 ? url.slice(qIdx) : '';
+  }},
+}};
+{core_script}
+getMetricsForState = () => ({json.dumps(_baseline_safe_metrics())});
+function resetDefaults() {{
+  Object.assign(state, {{
+    view: 'plan',
+    s_kiln_mm: 300,
+    u_kiln_side: 0.8,
+    exhaust_fan_cfm: 400,
+    d_hood_inlet_mm: 800,
+    z_hood_drop_mm: 400,
+    d_reflector_mm: 800,
+    g_floor_reflector_mm: 20,
+    t_reflector_calsil_mm: 0,
+    w_floor_pad_mm: 1200,
+    t_floor_pad_mm: 20,
+    w_door_open_mm: 150,
+  }});
+}}
+if (typeof loadStateFromUrl !== 'function') {{
+  throw new Error('loadStateFromUrl is not defined');
+}}
+if (typeof syncUrlFromState !== 'function') {{
+  throw new Error('syncUrlFromState is not defined');
+}}
+
+resetDefaults();
+loadStateFromUrl('?view=front&skiln=200&ukiln=0.3&fan=450&hood=600&hdrop=150&dref=800&gref=20&tref=10&tpad=0&door=0');
+const fullParsed = {{ ...state }};
+
+resetDefaults();
+loadStateFromUrl('?dref=0');
+const drefZero = {{ ...state }};
+
+resetDefaults();
+loadStateFromUrl('?dref=800&gref=0&tref=10');
+const trefNeedsGap = {{ ...state }};
+
+resetDefaults();
+loadStateFromUrl('?view=bogus&skiln=999&ukiln=abc&fan=-5');
+const invalidIgnored = {{ ...state }};
+
+resetDefaults();
+setupControls();
+syncControlButtons();
+__buttonMap['ctrl-view'].find(b => b.dataset.val === 'side').click();
+__buttonMap['ctrl-skiln'].find(b => b.dataset.val === '200').click();
+__buttonMap['ctrl-dref'].find(b => b.dataset.val === '0').click();
+__buttonMap['ctrl-hdrop'].find(b => b.dataset.val === '150').click();
+const clickedState = {{ ...state }};
+const clickedUrl = __replaceCalls[__replaceCalls.length - 1] || '';
+
+resetDefaults();
+const qIdx = clickedUrl.indexOf('?');
+loadStateFromUrl(qIdx >= 0 ? clickedUrl.slice(qIdx) : '');
+const roundTripState = {{ ...state }};
+
+process.stdout.write(JSON.stringify({{
+  fullParsed,
+  drefZero,
+  trefNeedsGap,
+  invalidIgnored,
+  replaceCount: __replaceCalls.length,
+  clickedUrl,
+  clickedState,
+  roundTripState,
+}}));
+"""
+    proc = subprocess.run(
+        ["/usr/bin/node", "-e", harness],
+        capture_output=True,
+        text=True,
+    )
+    self.assertEqual(
+        proc.returncode,
+        0,
+        f"Node harness failed (rc={proc.returncode}): {proc.stderr}",
+    )
+    res = json.loads(proc.stdout)
+
+    self.assertEqual(res["fullParsed"]["view"], "front")
+    self.assertEqual(res["fullParsed"]["s_kiln_mm"], 200)
+    self.assertAlmostEqual(res["fullParsed"]["u_kiln_side"], 0.3)
+    self.assertEqual(res["fullParsed"]["exhaust_fan_cfm"], 450)
+    self.assertEqual(res["fullParsed"]["d_hood_inlet_mm"], 600)
+    self.assertEqual(res["fullParsed"]["z_hood_drop_mm"], 150)
+    self.assertEqual(res["fullParsed"]["d_reflector_mm"], 800)
+    self.assertEqual(res["fullParsed"]["g_floor_reflector_mm"], 20)
+    self.assertEqual(res["fullParsed"]["t_reflector_calsil_mm"], 10)
+    self.assertEqual(res["fullParsed"]["t_floor_pad_mm"], 0)
+    self.assertEqual(res["fullParsed"]["w_door_open_mm"], 0)
+
+    self.assertEqual(res["drefZero"]["d_reflector_mm"], 0)
+    self.assertEqual(res["drefZero"]["g_floor_reflector_mm"], 0)
+    self.assertEqual(res["drefZero"]["t_reflector_calsil_mm"], 0)
+
+    self.assertEqual(res["trefNeedsGap"]["d_reflector_mm"], 800)
+    self.assertEqual(res["trefNeedsGap"]["t_reflector_calsil_mm"], 10)
+    self.assertEqual(res["trefNeedsGap"]["g_floor_reflector_mm"], 20)
+
+    self.assertEqual(res["invalidIgnored"]["view"], "plan")
+    self.assertEqual(res["invalidIgnored"]["s_kiln_mm"], 300)
+    self.assertAlmostEqual(res["invalidIgnored"]["u_kiln_side"], 0.8)
+    self.assertEqual(res["invalidIgnored"]["exhaust_fan_cfm"], 400)
+
+    self.assertGreaterEqual(res["replaceCount"], 4)
+    self.assertIn("view=side", res["clickedUrl"])
+    self.assertIn("skiln=200", res["clickedUrl"])
+    self.assertIn("dref=0", res["clickedUrl"])
+    self.assertIn("hdrop=150", res["clickedUrl"])
+    self.assertEqual(res["roundTripState"], res["clickedState"])
 
 
 if __name__ == "__main__":

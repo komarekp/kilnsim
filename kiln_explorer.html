@@ -1016,29 +1016,99 @@ function syncControlButtons() {
   }
 }
 
+const URL_PARAM_SPECS = [
+  { key: 'view',  prop: 'view',                  ctrlId: 'ctrl-view',  type: 'str', allowed: ['side', 'front', 'plan'] },
+  { key: 'skiln', prop: 's_kiln_mm',             ctrlId: 'ctrl-skiln', type: 'num', allowed: [200, 300] },
+  { key: 'ukiln', prop: 'u_kiln_side',           ctrlId: 'ctrl-ukiln', type: 'num', allowed: [0.8, 0.5, 0.3] },
+  { key: 'fan',   prop: 'exhaust_fan_cfm',       ctrlId: 'ctrl-fan',   type: 'num', allowed: [350, 400, 450] },
+  { key: 'hood',  prop: 'd_hood_inlet_mm',       ctrlId: 'ctrl-hood',  type: 'num', allowed: [600, 700, 800] },
+  { key: 'hdrop', prop: 'z_hood_drop_mm',        ctrlId: 'ctrl-hdrop', type: 'num', allowed: [150, 400, 600] },
+  { key: 'dref',  prop: 'd_reflector_mm',        ctrlId: 'ctrl-dref',  type: 'num', allowed: [0, 800] },
+  { key: 'gref',  prop: 'g_floor_reflector_mm',  ctrlId: 'ctrl-gref',  type: 'num', allowed: [0, 20] },
+  { key: 'tref',  prop: 't_reflector_calsil_mm', ctrlId: 'ctrl-tref',  type: 'num', allowed: [0, 10] },
+  { key: 'tpad',  prop: 't_floor_pad_mm',        ctrlId: 'ctrl-tpad',  type: 'num', allowed: [0, 20] },
+  { key: 'door',  prop: 'w_door_open_mm',        ctrlId: 'ctrl-door',  type: 'num', allowed: [0, 150] }
+];
+
+function loadStateFromUrl(searchOverride) {
+  const rawSearch = typeof searchOverride === 'string'
+    ? searchOverride
+    : ((typeof window !== 'undefined' && window.location && window.location.search) || '');
+  if (!rawSearch) return;
+  const params = new URLSearchParams(rawSearch);
+  const seenRefKeys = new Set();
+  for (const spec of URL_PARAM_SPECS) {
+    const raw = params.has(spec.key) ? params.get(spec.key)
+      : (params.has(spec.prop) ? params.get(spec.prop) : null);
+    if (raw === null) continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    if (spec.type === 'str') {
+      const normalized = trimmed.toLowerCase();
+      if (spec.allowed.includes(normalized)) {
+        state[spec.prop] = normalized;
+      }
+    } else {
+      const num = Number(trimmed);
+      if (Number.isFinite(num) && spec.allowed.includes(num)) {
+        state[spec.prop] = num;
+        if (spec.key === 'dref' || spec.key === 'gref' || spec.key === 'tref') {
+          seenRefKeys.add(spec.key);
+        }
+      }
+    }
+  }
+  if (seenRefKeys.has('dref') && state.d_reflector_mm === 0) {
+    enforceValidReflectorCombo('dref');
+  } else if (seenRefKeys.has('tref') && state.t_reflector_calsil_mm === 10) {
+    enforceValidReflectorCombo('tref');
+  } else if (seenRefKeys.has('gref')) {
+    enforceValidReflectorCombo('gref');
+  } else {
+    enforceValidReflectorCombo('');
+  }
+}
+
+function buildStateQueryString() {
+  const params = new URLSearchParams();
+  for (const spec of URL_PARAM_SPECS) {
+    params.set(spec.key, String(state[spec.prop]));
+  }
+  return '?' + params.toString();
+}
+
+function syncUrlFromState() {
+  if (typeof window === 'undefined' || !window.location || !window.history ||
+      typeof window.history.replaceState !== 'function') {
+    return;
+  }
+  const query = buildStateQueryString();
+  if (window.location.search === query) return;
+  const base = window.location.pathname || '';
+  const hash = window.location.hash || '';
+  try {
+    window.history.replaceState(null, '', base + query + hash);
+  } catch (_) {}
+}
+
 function setupControls() {
-  const map = {
-    'ctrl-view':  ['view', 'view'],
-    'ctrl-skiln': ['s_kiln_mm', 'skiln'],
-    'ctrl-ukiln': ['u_kiln_side', 'ukiln'],
-    'ctrl-fan':   ['exhaust_fan_cfm', 'fan'],
-    'ctrl-hood':  ['d_hood_inlet_mm', 'hood'],
-    'ctrl-hdrop': ['z_hood_drop_mm', 'hdrop'],
-    'ctrl-dref':  ['d_reflector_mm', 'dref'],
-    'ctrl-gref':  ['g_floor_reflector_mm', 'gref'],
-    'ctrl-tref':  ['t_reflector_calsil_mm', 'tref'],
-    'ctrl-tpad':  ['t_floor_pad_mm', 'tpad'],
-    'ctrl-door':  ['w_door_open_mm', 'door']
-  };
-  for (const [id, [prop, key]] of Object.entries(map)) {
-    document.querySelectorAll(`#${id} button`).forEach(btn => {
+  for (const spec of URL_PARAM_SPECS) {
+    document.querySelectorAll(`#${spec.ctrlId} button`).forEach(btn => {
       btn.addEventListener('click', () => {
         const val = btn.dataset.val;
-        state[prop] = isNaN(val) ? val : Number(val);
-        enforceValidReflectorCombo(key);
+        state[spec.prop] = spec.type === 'str' ? val : Number(val);
+        enforceValidReflectorCombo(spec.key);
         syncControlButtons();
+        syncUrlFromState();
         renderElevation();
       });
+    });
+  }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('popstate', () => {
+      loadStateFromUrl();
+      syncControlButtons();
+      renderElevation();
     });
   }
 }
@@ -1077,6 +1147,7 @@ function attachKilnDragHandler(svg) {
       if (snapped !== state.s_kiln_mm) {
         state.s_kiln_mm = snapped;
         syncControlButtons();
+        syncUrlFromState();
         renderElevation();
       }
     });
@@ -1110,6 +1181,7 @@ function attachKilnDragHandler(svg) {
       if (nearest !== state.z_hood_drop_mm) {
         state.z_hood_drop_mm = nearest;
         syncControlButtons();
+        syncUrlFromState();
         renderElevation();
       }
     });
@@ -1118,8 +1190,10 @@ function attachKilnDragHandler(svg) {
   }
 }
 
+loadStateFromUrl();
 setupControls();
 syncControlButtons();
+syncUrlFromState();
 renderElevation();
 </script>
 </body>
