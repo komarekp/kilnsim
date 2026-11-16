@@ -160,9 +160,13 @@ def _solve_ssr_internal_air(
     t_ref_k: float,
     t_lower_k: float,
     params: params_lib.SimParams,
+    t_kiln_facing_k: float | None = None,
+    q_bot_conv_w: float = 0.0,
 ) -> tuple[float, float]:
-  """Computes the steady-state SSR internal air and average casing temperatures."""
-  t_ssr_case_k = float(np.sum(t_ssr_faces_k * ssr_areas) / np.sum(ssr_areas))
+  """Computes the steady-state SSR internal air and 4-wall casing temperatures."""
+  a_outer_3 = float(np.sum(ssr_areas))
+  sum_t_a_3 = float(np.sum(t_ssr_faces_k * ssr_areas))
+  t_ssr_case_3_k = sum_t_a_3 / a_outer_3
 
   a_ref = math.pi * (params.r_reflector ** 2)
   if params.r_reflector > 0.0:
@@ -179,19 +183,61 @@ def _solve_ssr_internal_air(
   else:
     h_ref = 0.0
   q_ref_conv = max(0.0, h_ref * a_ref * (t_ref_k - t_lower_k))
+  q_subkiln_conv = (
+      q_ref_conv + constants.SSR_SUBKILN_CONV_WEIGHT * max(0.0, q_bot_conv_w)
+  )
   m_dot_local_inflow = constants.SSR_LOCAL_INFLOW_KG_S
-  dt_floor_conv = q_ref_conv / (m_dot_local_inflow * constants.AIR_CP)
+  dt_floor_conv = q_subkiln_conv / (m_dot_local_inflow * constants.AIR_CP)
   t_ssr_inlet_k = t_lower_k + dt_floor_conv
 
   a_louver_eff = constants.SSR_LOUVER_EFF_AREA_M2
   h_int_box = constants.H_CONV_SSR_INTERNAL_W_M2K
-  a_box_total = float(np.sum(ssr_areas))
+  a_ssr_4 = params.w_ssr * params.h_ssr
+  a_box_total = a_outer_3 + a_ssr_4
   ua_box = h_int_box * a_box_total
 
-  t_air_k = 0.5 * (t_ssr_inlet_k + t_ssr_case_k) + (
+  eps_k = max(0.05, params.eps_kiln_side)
+  eps_s = max(0.05, params.eps_ssr)
+  sigma = constants.STEFAN_BOLTZMANN
+  c_rad_kb = sigma / ((1.0 / eps_k) + (1.0 / eps_s) - 1.0)
+  c_rad_b4 = sigma / ((2.0 / eps_s) - 1.0)
+  h_baf = constants.SSR_BAFFLE_CONV_W_M2K
+  t_k_ssr = t_lower_k if t_kiln_facing_k is None else float(t_kiln_facing_k)
+
+  t_baf_k = 0.5 * (t_k_ssr + t_lower_k)
+  t_ssr_4_k = 0.5 * (t_ssr_case_3_k + t_baf_k)
+  t_air_k = 0.5 * (t_ssr_inlet_k + t_ssr_case_3_k) + (
       params.q_ssr_internal_w / max(ua_box, 1.0)
   )
+  t_ssr_case_k = t_ssr_case_3_k
   for _ in range(8):
+    for _ in range(3):
+      t_k4 = t_k_ssr ** 4
+      t_b3 = t_baf_k ** 3
+      t_b4 = t_baf_k * t_b3
+      t_43 = t_ssr_4_k ** 3
+      t_44 = t_ssr_4_k * t_43
+      f1 = (
+          c_rad_kb * (t_k4 - t_b4)
+          - c_rad_b4 * (t_b4 - t_44)
+          - 2.0 * h_baf * (t_baf_k - t_lower_k)
+      )
+      f2 = (
+          c_rad_b4 * (t_b4 - t_44)
+          + h_baf * (t_lower_k - t_ssr_4_k)
+          - h_int_box * (t_ssr_4_k - t_air_k)
+      )
+      a11 = 4.0 * (c_rad_kb + c_rad_b4) * t_b3 + 2.0 * h_baf
+      a12 = 4.0 * c_rad_b4 * t_43
+      a21 = 4.0 * c_rad_b4 * t_b3
+      a22 = 4.0 * c_rad_b4 * t_43 + h_baf + h_int_box
+      det = max(a11 * a22 - a12 * a21, 1e-12)
+      dt_b = max(-50.0, min(50.0, (a22 * f1 + a12 * f2) / det))
+      dt_4 = max(-50.0, min(50.0, (a21 * f1 + a11 * f2) / det))
+      t_baf_k = max(200.0, t_baf_k + dt_b)
+      t_ssr_4_k = max(200.0, t_ssr_4_k + dt_4)
+
+    t_ssr_case_k = (sum_t_a_3 + t_ssr_4_k * a_ssr_4) / a_box_total
     dt_buoy = abs(t_air_k - t_ssr_inlet_k)
     v_louver = constants.SSR_LOUVER_DISCHARGE_COEFF * math.sqrt(
         2.0 * constants.GRAVITY * params.h_ssr * (dt_buoy / t_ssr_inlet_k)
@@ -501,9 +547,39 @@ def solve_thermal_system(
     h_eff_b = chimney_sol.h_eff_back_patch[shield_mask]
     u_cond_diag[shield_mask] = (g_shield * h_eff_b) / (g_shield + h_eff_b)
 
-    # 4. SSR internal air & casing balance
+    # 4. SSR internal air & casing balance (with 4th kiln-facing wall/baffle
+    # and sub-kiln louver intake air preheating)
     t_ref_val = (
         float(t_safe[ref_mask][0]) if np.any(ref_mask) else t_room_lower_k
+    )
+    t_kiln_facing_k: float | None = None
+    if np.any(kiln_side_mask):
+      ur_x = math.cos(params.ssr_angle_rad)
+      ur_y = math.sin(params.ssr_angle_rad)
+      dot_ssr = mesh.normals[:, 0] * ur_x + mesh.normals[:, 1] * ur_y
+      facing_mask = (
+          kiln_side_mask
+          & (dot_ssr >= constants.SSR_FACING_COS_MIN)
+          & (mesh.bounds_max[:, 2] > params.z_ssr_bot)
+          & (mesh.bounds_min[:, 2] < params.z_ssr_top)
+      )
+      if not np.any(facing_mask):
+        facing_mask = kiln_side_mask & (dot_ssr >= constants.SSR_FACING_COS_MIN)
+      if not np.any(facing_mask):
+        facing_mask = kiln_side_mask
+      facing_areas = mesh.areas[facing_mask]
+      t_kiln_facing_k = float(
+          np.sum(t_safe[facing_mask] * facing_areas) / np.sum(facing_areas)
+      )
+    q_bot_conv_w = (
+        float(
+            np.sum(
+                np.maximum(0.0, q_conv_out[kiln_bot_mask])
+                * mesh.areas[kiln_bot_mask]
+            )
+        )
+        if np.any(kiln_bot_mask)
+        else 0.0
     )
     t_ssr_air_k, t_ssr_case_k = _solve_ssr_internal_air(
         t_ssr_faces_k=t_safe[ssr_mask],
@@ -511,6 +587,8 @@ def solve_thermal_system(
         t_ref_k=t_ref_val,
         t_lower_k=t_room_lower_k,
         params=params,
+        t_kiln_facing_k=t_kiln_facing_k,
+        q_bot_conv_w=q_bot_conv_w,
     )
     t_back_k[ssr_mask] = t_ssr_air_k
 

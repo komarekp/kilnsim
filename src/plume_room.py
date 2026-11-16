@@ -127,12 +127,15 @@ def solve_plume_and_room(
   areas = mesh.areas
 
   # 1. Sum convective heat release feeding the primary kiln plume (kiln side
-  # boundary layer + kiln lid top + open exhaust bung if not locally captured).
+  # boundary layer + kiln lid top + swept kiln-bottom fraction + open bung).
   kiln_mask = (stypes == int(mesh_lib.SurfaceType.KILN_SIDE)) | (
       stypes == int(mesh_lib.SurfaceType.KILN_LID)
   )
+  bot_mask = stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM)
   q_kiln_conv_w = float(
       np.sum(np.maximum(0.0, q_conv_front_w_m2[kiln_mask]) * areas[kiln_mask])
+  ) + constants.KILN_BOT_PLUME_FRACTION * float(
+      np.sum(np.maximum(0.0, q_conv_front_w_m2[bot_mask]) * areas[bot_mask])
   )
   q_bung_w = 0.0 if params.bung_captured else params.q_bung_open_w
   q_plume_total_w = max(0.0, q_kiln_conv_w + q_bung_w)
@@ -319,7 +322,16 @@ def solve_plume_and_room(
   q_conv_nonplume_w = np.where(
       kiln_mask,
       np.minimum(0.0, q_conv_front_w_m2) * areas,
-      q_conv_front_w_m2 * areas,
+      np.where(
+          bot_mask,
+          (
+              (1.0 - constants.KILN_BOT_PLUME_FRACTION)
+              * np.maximum(0.0, q_conv_front_w_m2)
+              + np.minimum(0.0, q_conv_front_w_m2)
+          )
+          * areas,
+          q_conv_front_w_m2 * areas,
+      ),
   )
   q_rad_vec = (
       np.zeros_like(areas) if q_rad_room_patch_w is None else q_rad_room_patch_w

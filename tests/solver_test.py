@@ -965,6 +965,48 @@ class SolverAndMetricsTest(absltest.TestCase):
     )
     self.assertGreater(metrics.t_ceiling_max_c, t_legacy_max_c + 2.0)
 
+  def test_ssr_kiln_facing_baffle_and_subkiln_air_heat_ssr_housing(
+      self,
+  ) -> None:
+    """Sub-kiln convection and 4th kiln-facing wall baffle both heat the SSR."""
+    cfg_base = copy.deepcopy(self.base_pb)
+    cfg_base.grid.dx_wall_mm = 200.0
+    cfg_base.grid.dz_wall_mm = 200.0
+    cfg_base.grid.n_theta_kiln = 8
+    cfg_base.grid.n_z_kiln = 3
+    cfg_base.thermal.sources.q_ssr_internal_w = 0.0
+    cfg_base.geometry.floor.d_reflector_mm = 0.0
+    cfg_base.geometry.floor.g_floor_reflector_mm = 0.0
+    cfg_base.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg_base.geometry.room.w_door_open_mm = 1500.0
+    cfg_base.thermal.sources.exhaust_fan_cfm = 450.0
+
+    # 1. Pure sub-kiln convection (cool kiln side, low-eps hot kiln bottom):
+    cfg_sub = copy.deepcopy(cfg_base)
+    cfg_sub.thermal.sources.u_kiln_side = 0.01
+    cfg_sub.thermal.emissivities.eps_kiln_side = 0.05
+    cfg_sub.thermal.sources.u_kiln_bot = 2.5
+    cfg_sub.thermal.emissivities.eps_kiln_bot = 0.05
+    p_sub = params_lib.from_proto(cfg_sub)
+    m_sub = mesh_lib.build_mesh(p_sub)
+    vf_sub = vf_lib.compute_view_factors(m_sub, p_sub)
+    sol_sub = solver_lib.solve_thermal_system(m_sub, vf_sub, p_sub)
+
+    # 2. Thin-standoff SSR (d_ssr=20 mm) next to hot kiln jacket (no bottom heat):
+    cfg_baf = copy.deepcopy(cfg_base)
+    cfg_baf.geometry.ssr.d_ssr_mm = 20.0
+    cfg_baf.thermal.sources.u_kiln_side = 2.5
+    cfg_baf.thermal.sources.u_kiln_bot = 0.01
+    cfg_baf.thermal.emissivities.eps_kiln_bot = 0.05
+    p_baf = params_lib.from_proto(cfg_baf)
+    m_baf = mesh_lib.build_mesh(p_baf)
+    vf_baf = vf_lib.compute_view_factors(m_baf, p_baf)
+    sol_baf = solver_lib.solve_thermal_system(m_baf, vf_baf, p_baf)
+
+    self.assertGreater(sol_sub.t_ssr_air_k - sol_sub.room.t_room_lower_k, 1.5)
+    self.assertGreater(sol_baf.t_ssr_case_k - sol_baf.room.t_room_lower_k, 5.0)
+    self.assertGreater(sol_baf.t_ssr_air_k - sol_baf.room.t_room_lower_k, 4.0)
+
 
 if __name__ == "__main__":
   absltest.main()

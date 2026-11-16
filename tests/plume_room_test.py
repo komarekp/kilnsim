@@ -385,6 +385,42 @@ class PlumeRoomTest(absltest.TestCase):
         sol_matched.plume_capture_fraction + 0.05,
     )
 
+  def test_kiln_bottom_convection_partially_entrains_into_rising_plume(
+      self,
+  ) -> None:
+    """Portion of KILN_BOTTOM natural convection sweeps around cylinder into plume."""
+    from src import constants
+
+    p, m, tf, qc, ch = self._make_plume_inputs(self.base_pb, q_kiln_flux=0.0)
+    bot_mask = m.surface_types == int(mesh_lib.SurfaceType.KILN_BOTTOM)
+    qc[bot_mask] = 500.0
+    q_bot_total = 500.0 * float(np.sum(m.areas[bot_mask]))
+
+    sol = plume_room_lib.solve_plume_and_room(
+        mesh=m,
+        t_front_k=tf,
+        q_conv_front_w_m2=qc,
+        chimney=ch,
+        t_lower_prev_k=p.t_ext_k,
+        params=p,
+    )
+
+    self.assertGreater(sol.q_plume_conv_w, 0.50 * q_bot_total)
+    self.assertLess(sol.q_plume_conv_w, 0.80 * q_bot_total)
+
+    q_in = float(np.sum(qc * m.areas))
+    ua_upper = p.compute_ua_upper_zone(sol.z_stratification_layer_m)
+    ua_lower = p.compute_ua_lower_zone(sol.z_stratification_layer_m)
+    q_out = (
+        ua_upper * (sol.t_room_upper_k - p.t_ext_k)
+        + ua_lower * (sol.t_room_lower_k - p.t_ext_k)
+        + sol.m_dot_door_buoy_kg_s
+        * constants.AIR_CP
+        * (sol.t_room_upper_k - p.t_ext_k)
+        + sol.q_hood_exhaust_w
+    )
+    self.assertAlmostEqual(q_in, q_out, delta=1e-4)
+
 
 if __name__ == "__main__":
   absltest.main()

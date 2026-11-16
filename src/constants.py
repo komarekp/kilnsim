@@ -47,6 +47,9 @@ SSR_LOUVER_EFF_AREA_M2: float = 0.0022  # m^2 effective free louver area
 SSR_LOCAL_INFLOW_KG_S: float = 0.035  # kg / s local convective entrainment
 SSR_LOUVER_DISCHARGE_COEFF: float = 0.55
 SSR_LOUVER_MIN_FLOW_KG_S: float = 1.2e-3  # kg / s minimum background leakage
+SSR_BAFFLE_CONV_W_M2K: float = 6.5  # W / (m^2 * K) ventilated standoff gap
+SSR_FACING_COS_MIN: float = 0.70710678  # cos(45 deg) kiln patch selection
+SSR_SUBKILN_CONV_WEIGHT: float = 0.50  # sub-kiln bottom air entering SSR louver
 
 # ---------------------------------------------------------------------------
 # Validation bounds in SI units (metres and dimensionless)
@@ -99,6 +102,7 @@ CHIMNEY_CAVITY_PR_EXP: float = 0.012
 CHIMNEY_CAVITY_ASPECT_EXP: float = -0.3
 CHIMNEY_CEILING_MIXING_FRACTION: float = 0.35
 PLUME_CEILING_MIXING_FRACTION: float = 0.35
+KILN_BOT_PLUME_FRACTION: float = 0.65
 MTT_PLUME_FLOW_COEFF: float = 0.071
 MTT_SOURCE_ENTRAINMENT_COEFF: float = 0.018
 HESKESTAD_VIRTUAL_ORIGIN_DIAM_COEFF: float = 1.02
