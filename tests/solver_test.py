@@ -1007,6 +1007,137 @@ class SolverAndMetricsTest(absltest.TestCase):
     self.assertGreater(sol_baf.t_ssr_case_k - sol_baf.room.t_room_lower_k, 5.0)
     self.assertGreater(sol_baf.t_ssr_air_k - sol_baf.room.t_room_lower_k, 4.0)
 
+  def test_subfloor_2d_lateral_conduction_smooths_hotspot_and_warms_adjacent_vinyl(
+      self,
+  ) -> None:
+    """2D screed/pad spreading reduces peak pad hotspots and warms adjacent vinyl."""
+    cfg_a = copy.deepcopy(self.base_pb)
+    cfg_a.grid.dx_wall_mm = 200.0
+    cfg_a.grid.dz_wall_mm = 200.0
+    cfg_a.grid.n_theta_kiln = 8
+    cfg_a.grid.n_z_kiln = 3
+    cfg_a.geometry.floor.d_reflector_mm = 730.0
+    cfg_a.geometry.floor.g_floor_reflector_mm = 60.0
+    cfg_a.thermal.sources.u_kiln_bot = 2.0
+    cfg_a.thermal.emissivities.eps_kiln_bot = 0.80
+    cfg_a.thermal.conductivities.k_pad = 2.0
+    cfg_a.thermal.conductivities.k_screed = 1.8
+    p_a = params_lib.from_proto(cfg_a)
+    m_a = mesh_lib.build_mesh(p_a)
+    vf_a = vf_lib.compute_view_factors(m_a, p_a)
+    sol_a = solver_lib.solve_thermal_system(m_a, vf_a, p_a)
+    met_a = metrics_lib.compute_safety_metrics(m_a, vf_a, sol_a, p_a)
+
+    r_sub_a = (
+        p_a.t_floor_pad / p_a.k_pad
+        + p_a.t_screed / p_a.k_screed
+        + p_a.t_vip / p_a.k_vip
+    )
+    pad_names = [
+        name
+        for name in vf_a.sensor_vf
+        if name in ("pad_edge_corner", "pad_edge_room")
+        or name.startswith("pad_outside_")
+    ]
+    t_1d_ring_peak_c = (
+        max(
+            metrics_lib._solve_floor_sensor_temp_k(
+                vf_vec=vf_a.sensor_vf[name],
+                radiosity_w_m2=sol_a.radiosity_w_m2,
+                eps_floor=metrics_lib.FLOOR_PAD_EMISSIVITY,
+                u_subfloor=1.0 / r_sub_a,
+                t_amb_k=sol_a.room.t_room_lower_k,
+                t_ext_k=p_a.t_ext_k,
+            )
+            for name in pad_names
+        )
+        - constants.KELVIN_OFFSET
+    )
+    self.assertLess(met_a.t_floor_pad_edge_c, t_1d_ring_peak_c - 1.5)
+
+    cfg_b = copy.deepcopy(self.base_pb)
+    cfg_b.grid.dx_wall_mm = 200.0
+    cfg_b.grid.dz_wall_mm = 200.0
+    cfg_b.grid.n_theta_kiln = 8
+    cfg_b.grid.n_z_kiln = 3
+    cfg_b.geometry.floor.d_reflector_mm = 720.0
+    cfg_b.geometry.floor.g_floor_reflector_mm = 0.0
+    cfg_b.geometry.floor.t_reflector_calsil_mm = 0.0
+    cfg_b.thermal.emissivities.eps_reflector_top = 0.90
+    cfg_b.geometry.floor.w_floor_pad_mm = 960.0
+    cfg_b.geometry.kiln.h_kiln_base_mm = 40.0
+    cfg_b.thermal.sources.u_kiln_bot = 6.0
+    cfg_b.thermal.emissivities.eps_kiln_bot = 0.90
+    cfg_b.thermal.sources.u_kiln_side = 0.10
+    cfg_b.thermal.conductivities.k_pad = 2.0
+    cfg_b.thermal.conductivities.k_screed = 2.0
+    p_b = params_lib.from_proto(cfg_b)
+    m_b = mesh_lib.build_mesh(p_b)
+    vf_b = vf_lib.compute_view_factors(m_b, p_b)
+    sol_b = solver_lib.solve_thermal_system(m_b, vf_b, p_b)
+    met_b = metrics_lib.compute_safety_metrics(m_b, vf_b, sol_b, p_b)
+
+    u_vinyl_b = 1.0 / (p_b.t_screed / p_b.k_screed + p_b.t_vip / p_b.k_vip)
+    t_1d_vinyl_c = (
+        max(
+            metrics_lib._solve_floor_sensor_temp_k(
+                vf_vec=vf_b.sensor_vf[name],
+                radiosity_w_m2=sol_b.radiosity_w_m2,
+                eps_floor=metrics_lib.VINYL_FLOOR_EMISSIVITY,
+                u_subfloor=u_vinyl_b,
+                t_amb_k=sol_b.room.t_room_lower_k,
+                t_ext_k=p_b.t_ext_k,
+            )
+            for name in ("vinyl_edge_x", "vinyl_edge_y")
+        )
+        - constants.KELVIN_OFFSET
+    )
+    self.assertGreater(met_b.t_vinyl_edge_c, t_1d_vinyl_c + 5.0)
+
+  def test_kiln_stand_leg_conductive_bridging_heats_subfloor_on_short_stand(
+      self,
+  ) -> None:
+    """Short steel kiln stand legs conduct jacket heat directly into subfloor."""
+    cfg_tall = copy.deepcopy(self.base_pb)
+    cfg_tall.grid.dx_wall_mm = 200.0
+    cfg_tall.grid.dz_wall_mm = 200.0
+    cfg_tall.grid.n_theta_kiln = 8
+    cfg_tall.grid.n_z_kiln = 3
+    cfg_tall.thermal.sources.u_kiln_bot = 0.05
+    cfg_tall.thermal.emissivities.eps_kiln_bot = 0.05
+    cfg_tall.thermal.sources.u_kiln_side = 1.2
+    cfg_tall.geometry.floor.d_reflector_mm = 900.0
+    cfg_tall.geometry.floor.t_reflector_calsil_mm = 20.0
+    cfg_tall.geometry.floor.g_floor_reflector_mm = 5.0
+    cfg_tall.geometry.floor.w_floor_pad_mm = 1100.0
+    cfg_tall.geometry.kiln.h_kiln_base_mm = 250.0
+
+    cfg_short = copy.deepcopy(cfg_tall)
+    cfg_short.geometry.kiln.h_kiln_base_mm = 35.0
+
+    p_tall = params_lib.from_proto(cfg_tall)
+    m_tall = mesh_lib.build_mesh(p_tall)
+    vf_tall = vf_lib.compute_view_factors(m_tall, p_tall)
+    sol_tall = solver_lib.solve_thermal_system(m_tall, vf_tall, p_tall)
+    met_tall = metrics_lib.compute_safety_metrics(m_tall, vf_tall, sol_tall, p_tall)
+
+    p_short = params_lib.from_proto(cfg_short)
+    m_short = mesh_lib.build_mesh(p_short)
+    vf_short = vf_lib.compute_view_factors(m_short, p_short)
+    sol_short = solver_lib.solve_thermal_system(m_short, vf_short, p_short)
+    met_short = metrics_lib.compute_safety_metrics(
+        m_short, vf_short, sol_short, p_short
+    )
+
+    self.assertGreater(
+        met_short.t_floor_pad_under_reflector_c,
+        met_tall.t_floor_pad_under_reflector_c + 8.0,
+    )
+    self.assertGreater(
+        met_short.t_vip_under_reflector_c,
+        met_tall.t_vip_under_reflector_c + 5.0,
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

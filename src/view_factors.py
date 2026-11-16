@@ -33,11 +33,17 @@ class ViewFactorSystem:
       enclosure, satisfying row conservation `sum_n(f_eff[m, n]) + f_room[m] = 1`.
     sensor_vf: Mapping from floor or ceiling sensor name to its (N,)
       differential view factor vector `dF_{sensor -> n}` across all mesh patches.
+    floor_grid_x_m: Optional 1D array of 2D floor grid X centers (m).
+    floor_grid_y_m: Optional 1D array of 2D floor grid Y centers (m).
+    floor_grid_vf: Optional `(Nx * Ny, N)` point-to-patch view factor matrix.
   """
 
   f_eff: np.ndarray
   f_room: np.ndarray
   sensor_vf: dict[str, np.ndarray]
+  floor_grid_x_m: np.ndarray | None = None
+  floor_grid_y_m: np.ndarray | None = None
+  floor_grid_vf: np.ndarray | None = None
 
 
 def coaxial_parallel_disks_vf(r1: float, r2: float, h: float) -> float:
@@ -1209,15 +1215,153 @@ def compute_view_factors(
       vf_vec *= constants.MAX_SENSOR_VF_SUM / s_sum
     sensor_vf[name] = vf_vec
 
-  # 7. Ceiling downward-facing and bare AAC gap point-to-patch view factor vectors
+  # 7. Ceiling downward-facing, bare AAC gap, and 2D floor grid view factors
   sensor_vf.update(compute_ceiling_sensor_vfs(mesh=mesh, params=params))
   sensor_vf.update(compute_bare_aac_sensor_vfs(mesh=mesh, params=params))
+  floor_grid_x_m, floor_grid_y_m, floor_grid_vf = compute_floor_grid_vfs(
+      mesh=mesh, params=params
+  )
 
   return ViewFactorSystem(
       f_eff=f_eff,
       f_room=f_room,
       sensor_vf=sensor_vf,
+      floor_grid_x_m=floor_grid_x_m,
+      floor_grid_y_m=floor_grid_y_m,
+      floor_grid_vf=floor_grid_vf,
   )
+
+
+def compute_floor_grid_vfs(
+    mesh: mesh_lib.SurfaceMesh,
+    params: params_lib.SimParams,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+  """Computes point-to-patch view factors on a 2D cartesian subfloor grid."""
+  x_max = min(params.l_room, params.w_floor_pad + constants.FLOOR_2D_MARGIN_M)
+  y_max = min(params.w_room, params.w_floor_pad + constants.FLOOR_2D_MARGIN_M)
+  nx = max(8, int(math.ceil(x_max / constants.FLOOR_2D_CELL_SIZE_M)))
+  ny = max(8, int(math.ceil(y_max / constants.FLOOR_2D_CELL_SIZE_M)))
+  xs = (np.arange(nx, dtype=np.float64) + 0.5) * (x_max / nx)
+  ys = (np.arange(ny, dtype=np.float64) + 0.5) * (y_max / ny)
+
+  xx, yy = np.meshgrid(xs, ys, indexing="ij")
+  gx = xx.ravel()
+  gy = yy.ravel()
+  in_pad = (gx <= params.w_floor_pad + 1e-9) & (
+      gy <= params.w_floor_pad + 1e-9
+  )
+  gz = np.where(in_pad, params.z_pad_top, 0.0)
+  pts = np.column_stack([gx, gy, gz])
+
+  m_cells = pts.shape[0]
+  n_patches = mesh.num_patches
+  vf_grid = np.zeros((m_cells, n_patches), dtype=np.float64)
+
+  r_cell = np.hypot(gx - params.x_kiln_center, gy - params.y_kiln_center)
+  exposed_mask = (
+      np.ones(m_cells, dtype=bool)
+      if params.r_reflector <= 0.0
+      else (r_cell > params.r_reflector)
+  )
+  exp_idx = np.flatnonzero(exposed_mask)
+  if exp_idx.size == 0:
+    return xs, ys, vf_grid
+
+  stypes = mesh.surface_types
+  c = mesh.centroids
+  n_vec = mesh.normals
+  areas = mesh.areas
+  min_gz = float(np.min(pts[exp_idx, 2]))
+  exclude_floor = (
+      (stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP))
+      | (stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+      | (c[:, 2] <= min_gz + 1e-6)
+  )
+  cand_ids = np.flatnonzero(~exclude_floor)
+  c_cand = c[cand_ids]
+  n_cand = n_vec[cand_ids]
+  a_cand = areas[cand_ids]
+
+  chunk_size = 128
+  if cand_ids.size > 0:
+    for start in range(0, exp_idx.size, chunk_size):
+      chunk = exp_idx[start : start + chunk_size]
+      pt_b = pts[chunk]
+      r_vec = c_cand[None, :, :] - pt_b[:, None, :]
+      dist_sq = np.sum(r_vec * r_vec, axis=2)
+      dist = np.sqrt(np.maximum(dist_sq, 1e-12))
+      cos_pt = r_vec[:, :, 2] / dist
+      cos_n = -np.sum(r_vec * n_cand[None, :, :], axis=2) / dist
+      vis = (cos_pt > 1e-6) & (cos_n > 1e-6)
+      pi_loc, ki_loc = np.nonzero(vis)
+      if pi_loc.size > 0:
+        blocked = _is_segment_blocked_by_solids(
+            p1=pt_b[pi_loc],
+            p2=c_cand[ki_loc],
+            params=params,
+            check_kiln_cyl=True,
+            check_hood=True,
+            check_reflector_disk=True,
+        )
+        vis[pi_loc[blocked], ki_loc[blocked]] = False
+      denom = math.pi * dist_sq + 0.5 * a_cand[None, :]
+      vf_chunk = np.where(
+          vis, cos_pt * cos_n * a_cand[None, :] / denom, 0.0
+      )
+      vf_grid[np.ix_(chunk, cand_ids)] = vf_chunk
+
+  bot_ids = np.flatnonzero(stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM))
+  if bot_ids.size == 1 and params.r_kiln > 0.0:
+    b_id = int(bot_ids[0])
+    bot_sub, _, d_area_bot = _sample_disk_quadrature(
+        x_center=params.x_kiln_center,
+        y_center=params.y_kiln_center,
+        z_plane=params.z_drum_bot,
+        r_inner=0.0,
+        r_outer=params.r_kiln,
+        n_r=constants.FLOOR_GRID_BOT_QUAD_R,
+        n_theta=constants.FLOOR_GRID_BOT_QUAD_THETA,
+    )
+    exp_below = exp_idx[pts[exp_idx, 2] < params.z_drum_bot - 1e-6]
+    if exp_below.size > 0:
+      pt_b = pts[exp_below]
+      r_vec = bot_sub[None, :, :] - pt_b[:, None, :]
+      dist_sq = np.sum(r_vec * r_vec, axis=2)
+      dist = np.sqrt(np.maximum(dist_sq, 1e-12))
+      cos_pt = r_vec[:, :, 2] / dist
+      vis_b = cos_pt > 1e-6
+      if (
+          params.r_reflector > 0.0
+          and params.z_reflector_top < params.z_drum_bot - 1e-6
+      ):
+        ref_inter = (pt_b[:, 2:3] < params.z_reflector_top - 1e-6)
+        dz_b = params.z_drum_bot - pt_b[:, 2:3]
+        t_ref = np.where(
+            ref_inter,
+            (params.z_reflector_top - pt_b[:, 2:3]) / np.maximum(dz_b, 1e-9),
+            0.0,
+        )
+        xh = pt_b[:, 0:1] + t_ref * (bot_sub[None, :, 0] - pt_b[:, 0:1])
+        yh = pt_b[:, 1:2] + t_ref * (bot_sub[None, :, 1] - pt_b[:, 1:2])
+        r_ref_sq = (params.r_reflector - 1e-4) ** 2
+        blocked_ref = ref_inter & (
+            (xh - params.x_kiln_center) ** 2
+            + (yh - params.y_kiln_center) ** 2
+            <= r_ref_sq
+        )
+        vis_b &= ~blocked_ref
+      denom_b = math.pi * dist_sq + 0.5 * d_area_bot
+      vf_grid[exp_below, b_id] = np.sum(
+          np.where(vis_b, (cos_pt * cos_pt * d_area_bot) / denom_b, 0.0),
+          axis=1,
+      )
+
+  row_sums = np.sum(vf_grid, axis=1)
+  over = row_sums > constants.MAX_SENSOR_VF_SUM
+  if np.any(over):
+    vf_grid[over] *= constants.MAX_SENSOR_VF_SUM / row_sums[over, None]
+
+  return xs, ys, vf_grid
 
 
 def _compute_upper_point_sensor_vfs(
@@ -1690,4 +1834,7 @@ def update_ceiling_sensor_vfs(
       f_eff=vf_sys.f_eff,
       f_room=vf_sys.f_room,
       sensor_vf=new_sensor_vf,
+      floor_grid_x_m=vf_sys.floor_grid_x_m,
+      floor_grid_y_m=vf_sys.floor_grid_y_m,
+      floor_grid_vf=vf_sys.floor_grid_vf,
   )

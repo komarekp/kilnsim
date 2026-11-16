@@ -3,6 +3,8 @@
 import math
 import numpy as np
 from scipy import optimize
+from scipy import sparse
+from scipy.sparse import linalg as sparse_linalg
 from src import constants
 from src import mesh as mesh_lib
 from src import params as params_lib
@@ -165,6 +167,258 @@ def _solve_floor_sensor_temp_k(
   )
 
 
+def _solve_floor_2d_field(
+    mesh: mesh_lib.SurfaceMesh,
+    vf_sys: vf_lib.ViewFactorSystem,
+    solution: solver_lib.SolverSolution,
+    params: params_lib.SimParams,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+  """Solves 2D lateral pad+screed conduction coupled to VIP and 4 stand legs."""
+  xs = vf_sys.floor_grid_x_m
+  ys = vf_sys.floor_grid_y_m
+  vf_grid = vf_sys.floor_grid_vf
+  if xs is None or ys is None or vf_grid is None:
+    raise ValueError("ViewFactorSystem does not contain 2D floor grid VFs.")
+
+  nx = int(xs.size)
+  ny = int(ys.size)
+  n_cells = nx * ny
+  dx = float(xs[1] - xs[0]) if nx > 1 else constants.FLOOR_2D_CELL_SIZE_M
+  dy = float(ys[1] - ys[0]) if ny > 1 else constants.FLOOR_2D_CELL_SIZE_M
+  d_area = dx * dy
+
+  xx, yy = np.meshgrid(xs, ys, indexing="ij")
+  gx = xx.ravel()
+  gy = yy.ravel()
+  in_pad_2d = (xx <= params.w_floor_pad + 1e-9) & (
+      yy <= params.w_floor_pad + 1e-9
+  )
+  in_pad = in_pad_2d.ravel()
+  r_cell = np.hypot(gx - params.x_kiln_center, gy - params.y_kiln_center)
+  under_ref = (
+      (r_cell <= params.r_reflector)
+      if params.r_reflector > 0.0
+      else np.zeros(n_cells, dtype=bool)
+  )
+
+  r_pad = (
+      (params.t_floor_pad / max(params.k_pad, 0.05))
+      if params.t_floor_pad > 0.0
+      else 0.0
+  )
+  r_screed = params.t_screed / max(params.k_screed, 0.05)
+  r_vip = params.t_vip / max(params.k_vip, 1e-4)
+  u_12 = np.where(
+      in_pad,
+      1.0 / max(r_pad + 0.5 * r_screed, 1e-4),
+      1.0 / max(0.5 * r_screed, 1e-4),
+  )
+  u_2_ext = 1.0 / max(0.5 * r_screed + r_vip, 1e-4)
+
+  # Assemble fixed 2N x 2N graph-Laplacian + vertical + ground conductances.
+  rows_list: list[np.ndarray] = []
+  cols_list: list[np.ndarray] = []
+  vals_list: list[np.ndarray] = []
+  diag_fixed = np.zeros(2 * n_cells, dtype=np.float64)
+
+  def _add_edges(u_idx: np.ndarray, v_idx: np.ndarray, g: np.ndarray) -> None:
+    pos = g > 0.0
+    if not np.any(pos):
+      return
+    u = u_idx[pos]
+    v = v_idx[pos]
+    gp = g[pos]
+    rows_list.extend([u, v])
+    cols_list.extend([v, u])
+    vals_list.extend([-gp, -gp])
+    np.add.at(diag_fixed, u, gp)
+    np.add.at(diag_fixed, v, gp)
+
+  k_lat_pad = params.k_pad * max(0.0, params.t_floor_pad)
+  k_lat_screed = params.k_screed * params.t_screed
+  grid_ids = np.arange(n_cells, dtype=np.int32).reshape(nx, ny)
+
+  if nx > 1:
+    u_x = grid_ids[:-1, :].ravel()
+    v_x = grid_ids[1:, :].ravel()
+    pad_x = (in_pad_2d[:-1, :] & in_pad_2d[1:, :]).ravel()
+    gx_top = np.where(pad_x, k_lat_pad * (dy / dx), 0.0)
+    gx_scr = np.full(u_x.size, k_lat_screed * (dy / dx), dtype=np.float64)
+    _add_edges(u_x, v_x, gx_top)
+    _add_edges(u_x + n_cells, v_x + n_cells, gx_scr)
+
+  if ny > 1:
+    u_y = grid_ids[:, :-1].ravel()
+    v_y = grid_ids[:, 1:].ravel()
+    pad_y = (in_pad_2d[:, :-1] & in_pad_2d[:, 1:]).ravel()
+    gy_top = np.where(pad_y, k_lat_pad * (dx / dy), 0.0)
+    gy_scr = np.full(u_y.size, k_lat_screed * (dx / dy), dtype=np.float64)
+    _add_edges(u_y, v_y, gy_top)
+    _add_edges(u_y + n_cells, v_y + n_cells, gy_scr)
+
+  top_nodes = np.arange(n_cells, dtype=np.int32)
+  scr_nodes = top_nodes + n_cells
+  g_12 = u_12 * d_area
+  _add_edges(top_nodes, scr_nodes, g_12)
+
+  g_2_ext = u_2_ext * d_area
+  diag_fixed[scr_nodes] += g_2_ext
+
+  b_fixed = np.zeros(2 * n_cells, dtype=np.float64)
+  b_fixed[scr_nodes] += g_2_ext * params.t_ext_k
+
+  # 4 steel kiln stand leg 1D fin bridges conducted to the subfloor surface.
+  stypes = mesh.surface_types
+  t_amb_k = float(solution.room.t_room_lower_k)
+  side_mask = stypes == int(mesh_lib.SurfaceType.KILN_SIDE)
+  bot_mask = stypes == int(mesh_lib.SurfaceType.KILN_BOTTOM)
+  if params.r_kiln > 0.0 and params.h_kiln_base > 0.0 and np.any(side_mask):
+    z_side = mesh.centroids[side_mask, 2]
+    z_min_side = float(np.min(z_side))
+    low_side = side_mask & (mesh.centroids[:, 2] <= z_min_side + 1e-4)
+    t_jacket_low_k = float(
+        np.sum(solution.t_front_k[low_side] * mesh.areas[low_side])
+        / np.sum(mesh.areas[low_side])
+    )
+    t_bot_k = (
+        float(solution.t_front_k[bot_mask][0])
+        if np.any(bot_mask)
+        else t_jacket_low_k
+    )
+    w_j = constants.KILN_LEG_JACKET_TEMP_WEIGHT
+    t_leg_top_k = w_j * t_jacket_low_k + (1.0 - w_j) * t_bot_k
+
+    l_leg = max(0.01, params.z_drum_bot - params.z_pad_top)
+    k_a = constants.KILN_LEG_K_W_MK * constants.KILN_LEG_METAL_AREA_M2
+    h_p = constants.KILN_LEG_H_EFF_W_M2K * constants.KILN_LEG_PERIMETER_M
+    m_fin = math.sqrt(h_p / max(k_a, 1e-12))
+    g0 = math.sqrt(h_p * k_a)
+    ml = min(25.0, m_fin * l_leg)
+    g_self = g0 / max(math.tanh(ml), 1e-9)
+    t_th_k = t_amb_k + (t_leg_top_k - t_amb_k) / math.cosh(ml)
+    g_leg_eff = 1.0 / (
+        (1.0 / max(g_self, 1e-9)) + constants.KILN_LEG_FOOT_CONTACT_R_K_W
+    )
+
+    r_leg = constants.KILN_LEG_RADIUS_FRACTION * params.r_kiln
+    leg_angles = (
+        0.25 * math.pi,
+        0.75 * math.pi,
+        -0.75 * math.pi,
+        -0.25 * math.pi,
+    )[: constants.NUM_KILN_LEGS]
+    for phi in leg_angles:
+      x_leg = params.x_kiln_center + r_leg * math.cos(phi)
+      y_leg = params.y_kiln_center + r_leg * math.sin(phi)
+      ix = int(np.argmin(np.abs(xs - x_leg)))
+      iy = int(np.argmin(np.abs(ys - y_leg)))
+      leg_cell = ix * ny + iy
+      diag_fixed[leg_cell] += g_leg_eff
+      b_fixed[leg_cell] += g_leg_eff * t_th_k
+
+  all_idx = np.arange(2 * n_cells, dtype=np.int32)
+  rows_list.append(all_idx)
+  cols_list.append(all_idx)
+  vals_list.append(diag_fixed)
+  l_fixed = sparse.csc_matrix(
+      (
+          np.concatenate(vals_list),
+          (np.concatenate(rows_list), np.concatenate(cols_list)),
+      ),
+      shape=(2 * n_cells, 2 * n_cells),
+  )
+
+  # Precompute exposed irradiance & under-reflector thermal boundary parameters.
+  sigma = constants.STEFAN_BOLTZMANN
+  eps_cell = np.where(in_pad, FLOOR_PAD_EMISSIVITY, VINYL_FLOOR_EMISSIVITY)
+  vf_sum = np.sum(vf_grid, axis=1)
+  f_room_cell = np.maximum(0.0, 1.0 - vf_sum)
+  g_inc = vf_grid @ solution.radiosity_w_m2 + (
+      f_room_cell * sigma * (t_amb_k ** 4)
+  )
+  q_abs_exp = eps_cell * g_inc
+
+  ref_mask = stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
+  has_ref = params.r_reflector > 0.0 and np.any(ref_mask) and np.any(under_ref)
+  is_flush_ref = params.g_floor_reflector <= constants.GEOM_TOL_M
+  has_calsil = params.t_reflector_calsil > constants.GEOM_TOL_M
+  r_calsil = (
+      (params.t_reflector_calsil / max(params.k_shield, 0.05))
+      if has_calsil
+      else 0.0
+  )
+  t_ref_front_k = float(solution.t_front_k[ref_mask][0]) if has_ref else t_amb_k
+  t_ref_back_k = t_ref_front_k
+  if has_ref:
+    _, _, t_ref_back_k, _ = solver_lib.solve_under_reflector_column(
+        t_ref_front_k=t_ref_front_k,
+        t_room_lower_k=t_amb_k,
+        params=params,
+    )
+  eps_underside = params.eps_shield if has_calsil else params.eps_reflector_top
+  eps_gap = 1.0 / (
+      (1.0 / max(eps_underside, 1e-3))
+      + (1.0 / FLOOR_PAD_EMISSIVITY)
+      - 1.0
+  )
+  g_flush = 1.0 / max(r_calsil, 1e-3)
+
+  x = np.full(2 * n_cells, 0.5 * (t_amb_k + params.t_ext_k), dtype=np.float64)
+  zero_pad = np.zeros(n_cells, dtype=np.float64)
+  for _ in range(constants.FLOOR_2D_NEWTON_ITERS):
+    t_surf = x[:n_cells]
+    dt = t_surf - t_amb_k
+    h_exp = np.where(
+        dt > 0.0,
+        np.maximum(
+            constants.H_CONV_MIN_W_M2K,
+            constants.H_CONV_HORIZ_UNSTABLE_COEFF * (np.abs(dt) ** 0.25),
+        ),
+        np.maximum(
+            constants.H_CONV_STABLE_MIN_W_M2K,
+            constants.H_CONV_HORIZ_STABLE_COEFF * (np.abs(dt) ** 0.20),
+        ),
+    )
+    q_top_exp = (
+        q_abs_exp - eps_cell * sigma * (t_surf ** 4) - h_exp * dt
+    ) * d_area
+    s_top_exp = (4.0 * eps_cell * sigma * (t_surf ** 3) + h_exp) * d_area
+
+    if has_ref:
+      if is_flush_ref:
+        q_top_ref = g_flush * (t_ref_front_k - t_surf) * d_area
+        s_top_ref = np.full(n_cells, g_flush * d_area, dtype=np.float64)
+      else:
+        q_top_ref = (
+            eps_gap * sigma * ((t_ref_back_k ** 4) - (t_surf ** 4))
+            + constants.H_CONV_UNDER_REFLECTOR_W_M2K * (t_amb_k - t_surf)
+        ) * d_area
+        s_top_ref = (
+            4.0 * eps_gap * sigma * (t_surf ** 3)
+            + constants.H_CONV_UNDER_REFLECTOR_W_M2K
+        ) * d_area
+      q_top = np.where(under_ref, q_top_ref, q_top_exp)
+      s_top = np.where(under_ref, s_top_ref, s_top_exp)
+    else:
+      q_top = q_top_exp
+      s_top = s_top_exp
+
+    j_mat = l_fixed + sparse.diags(
+        np.concatenate([s_top, zero_pad]), format="csc"
+    )
+    rhs = b_fixed.copy()
+    rhs[:n_cells] += q_top + s_top * t_surf
+    x = sparse_linalg.spsolve(j_mat, rhs)
+
+  t_surf_2d_k = x[:n_cells].reshape(nx, ny)
+  t_screed_2d_k = x[n_cells:].reshape(nx, ny)
+  t_vip_2d_k = params.t_ext_k + (
+      (t_screed_2d_k - params.t_ext_k) * (r_vip / (0.5 * r_screed + r_vip))
+  )
+  under_ref_2d = under_ref.reshape(nx, ny)
+  return t_surf_2d_k, t_vip_2d_k, in_pad_2d, under_ref_2d
+
+
 def _solve_ceiling_sensors_vec_k(
     vf_mat: np.ndarray,
     radiosity_w_m2: np.ndarray,
@@ -278,8 +532,7 @@ def compute_safety_metrics(
       (t_ssr_air_c < LIMIT_SSR_AIR_C) and (t_ssr_case_c < LIMIT_SSR_CASE_C)
   )
 
-  # 3. Floor Under Reflector (directly under the center of the kiln)
-  ref_mask = stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
+  # 3 & 4. Subfloor 2D Lateral Conduction & Kiln Stand Leg Fin Bridging
   r_vip = params.t_vip / params.k_vip
   r_screed = params.t_screed / params.k_screed
   r_pad = (
@@ -287,76 +540,158 @@ def compute_safety_metrics(
   )
   r_sub_total = r_pad + r_screed + r_vip
   u_pad_subfloor = 1.0 / r_sub_total
-
-  if params.r_reflector <= 0.0:
-    t_pad_center_k = _solve_floor_sensor_temp_k(
-        vf_vec=vf_sys.sensor_vf["pad_center"],
-        radiosity_w_m2=solution.radiosity_w_m2,
-        eps_floor=FLOOR_PAD_EMISSIVITY,
-        u_subfloor=u_pad_subfloor,
-        t_amb_k=solution.room.t_room_lower_k,
-        t_ext_k=params.t_ext_k,
-    )
-  else:
-    _, _, _, t_pad_center_k = solver_lib.solve_under_reflector_column(
-        t_ref_front_k=float(solution.t_front_k[ref_mask][0]),
-        t_room_lower_k=solution.room.t_room_lower_k,
-        params=params,
-    )
-
-  t_floor_pad_under_reflector_c = t_pad_center_k - params_lib.KELVIN_OFFSET
-  t_vip_under_ref_k = params.t_ext_k + (
-      (t_pad_center_k - params.t_ext_k) * (r_vip / r_sub_total)
-  )
-  t_vip_under_reflector_c = t_vip_under_ref_k - params_lib.KELVIN_OFFSET
-  floor_under_reflector_safe = t_vip_under_reflector_c < LIMIT_VIP_C
-
-  # 4. Floor Outside Reflector
   u_vinyl_subfloor = 1.0 / (r_screed + r_vip)
 
-  pad_sensor_names = [
-      name
-      for name in vf_sys.sensor_vf
-      if name in ("pad_edge_corner", "pad_edge_room")
-      or name.startswith("pad_outside_")
-  ]
-  pad_outside_temps_k = [
-      _solve_floor_sensor_temp_k(
-          vf_vec=vf_sys.sensor_vf[name],
+  if vf_sys.floor_grid_vf is not None and vf_sys.floor_grid_x_m is not None:
+    t_surf_2d_k, t_vip_2d_k, in_pad_2d, under_ref_2d = _solve_floor_2d_field(
+        mesh=mesh, vf_sys=vf_sys, solution=solution, params=params
+    )
+    xs = vf_sys.floor_grid_x_m
+    ys = vf_sys.floor_grid_y_m
+    xx, yy = np.meshgrid(xs, ys, indexing="ij")
+    r_grid = np.hypot(xx - params.x_kiln_center, yy - params.y_kiln_center)
+
+    r_core = constants.FLOOR_UNDER_CORE_FRACTION * min(
+        params.r_kiln, params.r_reflector
+    )
+    under_mask = (
+        (in_pad_2d & (r_grid <= r_core))
+        if params.r_reflector > 0.0 and np.any(in_pad_2d & (r_grid <= r_core))
+        else (
+            (under_ref_2d & in_pad_2d)
+            if params.r_reflector > 0.0 and np.any(under_ref_2d & in_pad_2d)
+            else (
+                in_pad_2d
+                & (
+                    r_grid
+                    <= max(0.5 * params.r_kiln, constants.FLOOR_2D_CELL_SIZE_M)
+                )
+            )
+        )
+    )
+    if not np.any(under_mask):
+      under_mask = np.zeros_like(in_pad_2d)
+      under_mask.flat[int(np.argmin(r_grid))] = True
+
+    t_pad_center_k = float(np.max(t_surf_2d_k[under_mask]))
+    t_floor_pad_under_reflector_c = t_pad_center_k - params_lib.KELVIN_OFFSET
+    t_vip_under_reflector_c = (
+        float(np.max(t_vip_2d_k[under_mask])) - params_lib.KELVIN_OFFSET
+    )
+
+    pad_out_mask = (
+        (in_pad_2d & (~under_ref_2d))
+        if params.r_reflector > 0.0 and np.any(in_pad_2d & (~under_ref_2d))
+        else (in_pad_2d & (~under_mask))
+    )
+    if not np.any(pad_out_mask):
+      pad_out_mask = in_pad_2d
+    t_floor_pad_edge_c = (
+        float(np.max(t_surf_2d_k[pad_out_mask])) - params_lib.KELVIN_OFFSET
+    )
+
+    vip_out_mask = (
+        (~under_ref_2d)
+        if params.r_reflector > 0.0 and np.any(~under_ref_2d)
+        else (~under_mask)
+    )
+    if not np.any(vip_out_mask):
+      vip_out_mask = np.ones_like(under_mask, dtype=bool)
+    t_vip_outside_reflector_c = (
+        float(np.max(t_vip_2d_k[vip_out_mask])) - params_lib.KELVIN_OFFSET
+    )
+
+    vinyl_mask = ~in_pad_2d
+    if np.any(vinyl_mask):
+      t_vinyl_edge_c = (
+          float(np.max(t_surf_2d_k[vinyl_mask])) - params_lib.KELVIN_OFFSET
+      )
+    else:
+      t_vinyl_x_k = _solve_floor_sensor_temp_k(
+          vf_vec=vf_sys.sensor_vf["vinyl_edge_x"],
+          radiosity_w_m2=solution.radiosity_w_m2,
+          eps_floor=VINYL_FLOOR_EMISSIVITY,
+          u_subfloor=u_vinyl_subfloor,
+          t_amb_k=solution.room.t_room_lower_k,
+          t_ext_k=params.t_ext_k,
+      )
+      t_vinyl_y_k = _solve_floor_sensor_temp_k(
+          vf_vec=vf_sys.sensor_vf["vinyl_edge_y"],
+          radiosity_w_m2=solution.radiosity_w_m2,
+          eps_floor=VINYL_FLOOR_EMISSIVITY,
+          u_subfloor=u_vinyl_subfloor,
+          t_amb_k=solution.room.t_room_lower_k,
+          t_ext_k=params.t_ext_k,
+      )
+      t_vinyl_edge_c = max(t_vinyl_x_k, t_vinyl_y_k) - params_lib.KELVIN_OFFSET
+  else:
+    ref_mask = stypes == int(mesh_lib.SurfaceType.REFLECTOR_TOP)
+    if params.r_reflector <= 0.0:
+      t_pad_center_k = _solve_floor_sensor_temp_k(
+          vf_vec=vf_sys.sensor_vf["pad_center"],
           radiosity_w_m2=solution.radiosity_w_m2,
           eps_floor=FLOOR_PAD_EMISSIVITY,
           u_subfloor=u_pad_subfloor,
           t_amb_k=solution.room.t_room_lower_k,
           t_ext_k=params.t_ext_k,
       )
-      for name in pad_sensor_names
-  ]
-  t_pad_edge_max_k = max(pad_outside_temps_k)
-  t_floor_pad_edge_c = t_pad_edge_max_k - params_lib.KELVIN_OFFSET
+    else:
+      _, _, _, t_pad_center_k = solver_lib.solve_under_reflector_column(
+          t_ref_front_k=float(solution.t_front_k[ref_mask][0]),
+          t_room_lower_k=solution.room.t_room_lower_k,
+          params=params,
+      )
 
-  t_vip_outside_ref_k = params.t_ext_k + (
-      (t_pad_edge_max_k - params.t_ext_k) * (r_vip / r_sub_total)
-  )
-  t_vip_outside_reflector_c = t_vip_outside_ref_k - params_lib.KELVIN_OFFSET
+    t_floor_pad_under_reflector_c = t_pad_center_k - params_lib.KELVIN_OFFSET
+    t_vip_under_ref_k = params.t_ext_k + (
+        (t_pad_center_k - params.t_ext_k) * (r_vip / r_sub_total)
+    )
+    t_vip_under_reflector_c = t_vip_under_ref_k - params_lib.KELVIN_OFFSET
 
-  t_vinyl_x_k = _solve_floor_sensor_temp_k(
-      vf_vec=vf_sys.sensor_vf["vinyl_edge_x"],
-      radiosity_w_m2=solution.radiosity_w_m2,
-      eps_floor=VINYL_FLOOR_EMISSIVITY,
-      u_subfloor=u_vinyl_subfloor,
-      t_amb_k=solution.room.t_room_lower_k,
-      t_ext_k=params.t_ext_k,
-  )
-  t_vinyl_y_k = _solve_floor_sensor_temp_k(
-      vf_vec=vf_sys.sensor_vf["vinyl_edge_y"],
-      radiosity_w_m2=solution.radiosity_w_m2,
-      eps_floor=VINYL_FLOOR_EMISSIVITY,
-      u_subfloor=u_vinyl_subfloor,
-      t_amb_k=solution.room.t_room_lower_k,
-      t_ext_k=params.t_ext_k,
-  )
-  t_vinyl_edge_c = max(t_vinyl_x_k, t_vinyl_y_k) - params_lib.KELVIN_OFFSET
+    pad_sensor_names = [
+        name
+        for name in vf_sys.sensor_vf
+        if name in ("pad_edge_corner", "pad_edge_room")
+        or name.startswith("pad_outside_")
+    ]
+    pad_outside_temps_k = [
+        _solve_floor_sensor_temp_k(
+            vf_vec=vf_sys.sensor_vf[name],
+            radiosity_w_m2=solution.radiosity_w_m2,
+            eps_floor=FLOOR_PAD_EMISSIVITY,
+            u_subfloor=u_pad_subfloor,
+            t_amb_k=solution.room.t_room_lower_k,
+            t_ext_k=params.t_ext_k,
+        )
+        for name in pad_sensor_names
+    ]
+    t_pad_edge_max_k = max(pad_outside_temps_k)
+    t_floor_pad_edge_c = t_pad_edge_max_k - params_lib.KELVIN_OFFSET
 
+    t_vip_outside_ref_k = params.t_ext_k + (
+        (t_pad_edge_max_k - params.t_ext_k) * (r_vip / r_sub_total)
+    )
+    t_vip_outside_reflector_c = t_vip_outside_ref_k - params_lib.KELVIN_OFFSET
+
+    t_vinyl_x_k = _solve_floor_sensor_temp_k(
+        vf_vec=vf_sys.sensor_vf["vinyl_edge_x"],
+        radiosity_w_m2=solution.radiosity_w_m2,
+        eps_floor=VINYL_FLOOR_EMISSIVITY,
+        u_subfloor=u_vinyl_subfloor,
+        t_amb_k=solution.room.t_room_lower_k,
+        t_ext_k=params.t_ext_k,
+    )
+    t_vinyl_y_k = _solve_floor_sensor_temp_k(
+        vf_vec=vf_sys.sensor_vf["vinyl_edge_y"],
+        radiosity_w_m2=solution.radiosity_w_m2,
+        eps_floor=VINYL_FLOOR_EMISSIVITY,
+        u_subfloor=u_vinyl_subfloor,
+        t_amb_k=solution.room.t_room_lower_k,
+        t_ext_k=params.t_ext_k,
+    )
+    t_vinyl_edge_c = max(t_vinyl_x_k, t_vinyl_y_k) - params_lib.KELVIN_OFFSET
+
+  floor_under_reflector_safe = t_vip_under_reflector_c < LIMIT_VIP_C
   floor_outside_reflector_safe = (
       (t_vip_outside_reflector_c < LIMIT_VIP_C)
       and (t_vinyl_edge_c < LIMIT_VINYL_C)

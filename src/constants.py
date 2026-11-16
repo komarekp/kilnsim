@@ -137,6 +137,22 @@ LIMIT_AAC_C: float = 120.0
 FLOOR_PAD_EMISSIVITY: float = 0.88
 VINYL_FLOOR_EMISSIVITY: float = 0.90
 
+# 2D planar subfloor lateral conduction & 4 steel stand leg fin bridge
+FLOOR_2D_CELL_SIZE_M: float = 0.075
+FLOOR_2D_MARGIN_M: float = 0.35
+FLOOR_2D_NEWTON_ITERS: int = 6
+FLOOR_GRID_BOT_QUAD_R: int = 8
+FLOOR_GRID_BOT_QUAD_THETA: int = 24
+FLOOR_UNDER_CORE_FRACTION: float = 0.58
+NUM_KILN_LEGS: int = 4
+KILN_LEG_RADIUS_FRACTION: float = 0.55
+KILN_LEG_METAL_AREA_M2: float = 1.5e-4
+KILN_LEG_PERIMETER_M: float = 0.14
+KILN_LEG_K_W_MK: float = 25.0
+KILN_LEG_H_EFF_W_M2K: float = 18.0
+KILN_LEG_JACKET_TEMP_WEIGHT: float = 1.0
+KILN_LEG_FOOT_CONTACT_R_K_W: float = 4.0
+
 # ---------------------------------------------------------------------------
 # Coupled steady-state solver numerical parameters
 # ---------------------------------------------------------------------------
