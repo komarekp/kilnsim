@@ -101,6 +101,7 @@ py_test(
     srcs = ["kiln_explorer_test.py"],
     data = ["//:kiln_explorer.html"],
     deps = [
+        "//:run_sweep_lib",
         "//src:constants",
     ],
 )

@@ -440,18 +440,26 @@ const state = {
   view: 'plan', // 'side', 'front', or 'plan'
   s_kiln_mm: 300,
   u_kiln_side: 0.8,
-  exhaust_fan_cfm: 400,
-  d_hood_inlet_mm: 800,
-  z_hood_drop_mm: 400,
-  d_reflector_mm: 800,
-  g_floor_reflector_mm: 20,
-  t_reflector_calsil_mm: 0,
   w_floor_pad_mm: 1200,
   t_floor_pad_mm: 20,
-  w_door_open_mm: 150
+  w_door_open_mm: 150,
+  exhaust_fan_cfm: 400,
+  d_reflector_mm: 800,
+  t_reflector_calsil_mm: 0,
+  g_floor_reflector_mm: 20,
+  d_chimney_mm: 0,
+  g_chimney_mm: 0,
+  w_shield_mm: 1200,
+  d_hood_inlet_mm: 800,
+  z_hood_drop_mm: 400,
+  bung_captured: true
 };
 
 function enforceValidReflectorCombo(changedKey) {
+  const comboKey = `${state.d_reflector_mm}|${state.t_reflector_calsil_mm}|${state.g_floor_reflector_mm}`;
+  if (Object.prototype.hasOwnProperty.call(SWEEP_DIMS.refCombo, comboKey)) {
+    return;
+  }
   if (state.d_reflector_mm === 0) {
     if (changedKey === 'dref') {
       state.g_floor_reflector_mm = 0;
@@ -465,6 +473,19 @@ function enforceValidReflectorCombo(changedKey) {
       state.g_floor_reflector_mm = 20;
     } else {
       state.t_reflector_calsil_mm = 0;
+    }
+  }
+  const updatedKey = `${state.d_reflector_mm}|${state.t_reflector_calsil_mm}|${state.g_floor_reflector_mm}`;
+  if (!Object.prototype.hasOwnProperty.call(SWEEP_DIMS.refCombo, updatedKey)) {
+    const combos = Object.keys(SWEEP_DIMS.refCombo).map(k => k.split('|').map(Number));
+    const idxByKey = { dref: 0, tref: 1, gref: 2 };
+    const partIdx = idxByKey[changedKey];
+    const targetVal = partIdx !== undefined
+      ? [state.d_reflector_mm, state.t_reflector_calsil_mm, state.g_floor_reflector_mm][partIdx]
+      : null;
+    const match = (partIdx !== undefined && combos.find(c => c[partIdx] === targetVal)) || combos[0];
+    if (match) {
+      [state.d_reflector_mm, state.t_reflector_calsil_mm, state.g_floor_reflector_mm] = match;
     }
   }
 }
@@ -481,8 +502,12 @@ const SWEEP_DIMS = {
   door: { 0: 0, 150: 1 },
   fan: { 350: 0, 400: 1, 450: 2 },
   refCombo: { "0|0|0": 0, "800|0|0": 1, "800|0|20": 2, "800|10|20": 3 },
+  dchim: { 0: 0 },
+  gchim: { 0: 0 },
+  wshield: { 1200: 0 },
   hood: { 600: 0, 700: 1, 800: 2 },
-  hdrop: { 150: 0, 400: 1, 600: 2 }
+  hdrop: { 150: 0, 400: 1, 600: 2 },
+  bung: { true: 0 }
 };
 
 const HOOD_DROP_OPTIONS_MM = [150, 400, 600];
@@ -506,12 +531,16 @@ function getMetricsForState(st) {
   const i_fan = SWEEP_DIMS.fan[st.exhaust_fan_cfm] ?? 0;
   const comboKey = `${st.d_reflector_mm}|${st.t_reflector_calsil_mm}|${st.g_floor_reflector_mm}`;
   const i_combo = SWEEP_DIMS.refCombo[comboKey] ?? 0;
+  const i_dchim = SWEEP_DIMS.dchim[st.d_chimney_mm] ?? 0;
+  const i_gchim = SWEEP_DIMS.gchim[st.g_chimney_mm] ?? 0;
+  const i_wshield = SWEEP_DIMS.wshield[st.w_shield_mm] ?? 0;
   const i_hood = SWEEP_DIMS.hood[st.d_hood_inlet_mm] ?? 2;
   const i_hdrop = SWEEP_DIMS.hdrop[st.z_hood_drop_mm] ?? 1;
+  const i_bung = SWEEP_DIMS.bung[st.bung_captured] ?? 0;
 
-  // Stride decomposition (matching pack order: s, ukiln, pad, tpad, door, fan, refCombo, hood, hdrop)
-  // Sizes: [2, 3, 1, 2, 2, 3, 4, 3, 3], 19 Uint16 values per state
-  const stateIdx = ((((((((i_s * 3 + i_ukiln) * 1 + i_pad) * 2 + i_tpad) * 2 + i_door) * 3 + i_fan) * 4 + i_combo) * 3 + i_hood) * 3 + i_hdrop) * 19;
+  // Stride decomposition (matching pack order: s, ukiln, pad, tpad, door, fan, refCombo, dchim, gchim, wshield, hood, hdrop, bung)
+  // Sizes: [2, 3, 1, 2, 2, 3, 4, 1, 1, 1, 3, 3, 1], 19 Uint16 values per state
+  const stateIdx = ((((((((((((i_s * 3 + i_ukiln) * 1 + i_pad) * 2 + i_tpad) * 2 + i_door) * 3 + i_fan) * 4 + i_combo) * 1 + i_dchim) * 1 + i_gchim) * 1 + i_wshield) * 3 + i_hood) * 3 + i_hdrop) * 1 + i_bung) * 19;
 
   return {
     t_gypsum_max_left_c: _sweepU16[stateIdx] / 10.0,
@@ -625,9 +654,9 @@ function renderElevation() {
     : 'To-scale elevation viewed from the front doors facing the back wall (Left wall on left at y = 0 mm)';
   document.getElementById('drag-hint-msg').textContent = '↔ Drag kiln (200 / 300 mm standoff) · ↕ Drag hood (150 / 400 / 600 mm drop from ceiling)';
 
-  const x_shield_front = GEOM.d_chimney + GEOM.t_shield; 
+  const x_shield_front = state.d_chimney_mm + GEOM.t_shield; 
   const c_kiln = x_shield_front + state.s_kiln_mm + GEOM.r_kiln;
-  const c_shield_end = isSide ? x_shield_front + GEOM.w_shield_left : GEOM.d_chimney + GEOM.w_shield_back;
+  const c_shield_end = isSide ? x_shield_front + state.w_shield_mm : state.d_chimney_mm + state.w_shield_mm;
 
   const z_pad_top = 0;
   const z_ref_bot = z_pad_top + state.g_floor_reflector_mm;
@@ -674,12 +703,14 @@ function renderElevation() {
   const y_kiln_top = zToSvg(z_kiln_top);
 
   // Background Wall
-  const bgShieldLbl = `CALSIL HEAT SHIELD (${isSide ? GEOM.w_shield_left : GEOM.w_shield_back} mm)`;
-  const c_shield_start = isSide ? GEOM.d_chimney + GEOM.t_shield : GEOM.d_chimney;
+  const bgShieldLbl = `CALSIL HEAT SHIELD (${state.w_shield_mm} mm)`;
+  const c_shield_start = isSide ? state.d_chimney_mm + GEOM.t_shield : state.d_chimney_mm;
   const u_gyp_l = getLeft(c_shield_end, C_MAX), u_gyp_w = getWidth(c_shield_end, C_MAX);
+  const y_shield_top = zToSvg(GEOM.h_wall - state.g_chimney_mm);
+  const y_shield_bot = zToSvg(state.g_chimney_mm);
 
   html += `<rect x="${u_gyp_l}" y="${y_ceil}" width="${u_gyp_w}" height="${y_floor - y_ceil}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
-  html += `<rect x="${getLeft(c_shield_start, c_shield_end)}" y="${y_ceil}" width="${getWidth(c_shield_start, c_shield_end)}" height="${y_floor - y_ceil}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
+  html += `<rect x="${getLeft(c_shield_start, c_shield_end)}" y="${y_shield_top}" width="${getWidth(c_shield_start, c_shield_end)}" height="${y_shield_bot - y_shield_top}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
 
   // Stratification layer (line across the room; text sits in the exposed-gypsum strip)
   const y_strat = zToSvg(m.z_stratification_layer_mm);
@@ -694,8 +725,8 @@ function renderElevation() {
   html += `<rect x="${getLeft(C_MIN, 0)}" y="${y_ceil}" width="${getWidth(C_MIN, 0)}" height="${y_floor - y_ceil}" fill="#b9a6cc" stroke="#7d8690" stroke-width="1.5"/>`;
   html += vText(getU(-107.5), y_ceil + 190, edgeWallLbl, FS.label, '#2d2440');
 
-  const c_cross_shield_end = GEOM.d_chimney + GEOM.t_shield;
-  html += `<rect x="${getLeft(0, c_cross_shield_end)}" y="${y_ceil}" width="${getWidth(0, c_cross_shield_end)}" height="${y_floor - y_ceil}" fill="#2f3337" stroke="#1d2023" stroke-width="1"/>`;
+  const c_cross_shield_end = state.d_chimney_mm + GEOM.t_shield;
+  html += `<rect x="${getLeft(state.d_chimney_mm, c_cross_shield_end)}" y="${y_shield_top}" width="${getWidth(state.d_chimney_mm, c_cross_shield_end)}" height="${y_shield_bot - y_shield_top}" fill="#2f3337" stroke="#1d2023" stroke-width="1"/>`;
 
   // Ceiling
   const h_ceil_px = 40;
@@ -840,8 +871,8 @@ function renderPlanView(svg, m) {
   document.getElementById('header-subtitle').textContent = 'To-scale top-down plan view of the studio corner (Back wall at x = 0 on left; Left wall at y = 0 at bottom)';
   document.getElementById('drag-hint-msg').textContent = '⤡ Drag the kiln diagonally to toggle between 200 mm and 300 mm wall standoffs';
 
-  const x_kiln = GEOM.d_chimney + GEOM.t_shield + state.s_kiln_mm + GEOM.r_kiln;
-  const y_kiln = GEOM.d_chimney + GEOM.t_shield + state.s_kiln_mm + GEOM.r_kiln;
+  const x_kiln = state.d_chimney_mm + GEOM.t_shield + state.s_kiln_mm + GEOM.r_kiln;
+  const y_kiln = state.d_chimney_mm + GEOM.t_shield + state.s_kiln_mm + GEOM.r_kiln;
   const r_ref = 0.5 * state.d_reflector_mm;
 
   let html = `
@@ -884,12 +915,12 @@ function renderPlanView(svg, m) {
   html += vText(px(-GEOM.t_aac / 2), py(1350), 'BACK AAC WALL (215 mm)', FS.label, '#2d2440');
 
   // Exposed Gypsum (Left wall at y=0, Back wall at x=0)
-  html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left)}" y="${pYTop(0, GEOM.t_gypsum)}" width="${(1700 - GEOM.d_chimney - GEOM.t_shield - GEOM.w_shield_left)*SCALE}" height="${pHeight(GEOM.t_gypsum)}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
-  html += `<rect x="${px(0)}" y="${pYTop(GEOM.d_chimney + GEOM.w_shield_back, 1700 - GEOM.d_chimney - GEOM.w_shield_back)}" width="${GEOM.t_gypsum*SCALE}" height="${pHeight(1700 - GEOM.d_chimney - GEOM.w_shield_back)}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
+  html += `<rect x="${px(state.d_chimney_mm + GEOM.t_shield + state.w_shield_mm)}" y="${pYTop(0, GEOM.t_gypsum)}" width="${(1700 - state.d_chimney_mm - GEOM.t_shield - state.w_shield_mm)*SCALE}" height="${pHeight(GEOM.t_gypsum)}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
+  html += `<rect x="${px(0)}" y="${pYTop(state.d_chimney_mm + state.w_shield_mm, 1700 - state.d_chimney_mm - state.w_shield_mm)}" width="${GEOM.t_gypsum*SCALE}" height="${pHeight(1700 - state.d_chimney_mm - state.w_shield_mm)}" fill="#f4efe0" stroke="#b8bec6" stroke-width="1"/>`;
 
   // Heat Shields (Corner Butt-Joint)
-  html += `<rect x="${px(GEOM.d_chimney + GEOM.t_shield)}" y="${pYTop(GEOM.d_chimney, GEOM.t_shield)}" width="${GEOM.w_shield_left*SCALE}" height="${pHeight(GEOM.t_shield)}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
-  html += `<rect x="${px(GEOM.d_chimney)}" y="${pYTop(GEOM.d_chimney, GEOM.w_shield_back)}" width="${GEOM.t_shield*SCALE}" height="${pHeight(GEOM.w_shield_back)}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
+  html += `<rect x="${px(state.d_chimney_mm + GEOM.t_shield)}" y="${pYTop(state.d_chimney_mm, GEOM.t_shield)}" width="${state.w_shield_mm*SCALE}" height="${pHeight(GEOM.t_shield)}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
+  html += `<rect x="${px(state.d_chimney_mm)}" y="${pYTop(state.d_chimney_mm, state.w_shield_mm)}" width="${GEOM.t_shield*SCALE}" height="${pHeight(state.w_shield_mm)}" fill="#4a4f55" stroke="#34383d" stroke-width="1"/>`;
 
   // Reflector
   if (r_ref > 0) {
@@ -927,8 +958,8 @@ function renderPlanView(svg, m) {
   const sensors = [
     { id: "duct_air", label: "Exhaust Duct Air", temp: m.t_exhaust_duct_c, safe: true, x: x_kiln, y: y_kiln + 50 },
     { id: "ceil", label: "Ceiling Max", temp: m.t_ceiling_max_c, safe: sf.ceiling, x: x_kiln - r_ceil * Math.SQRT1_2, y: y_kiln + r_ceil * Math.SQRT1_2 },
-    { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: sf.gyp_left, x: GEOM.d_chimney + GEOM.t_shield + GEOM.w_shield_left + 45, y: 12.5 },
-    { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: sf.gyp_back, x: 12.5, y: GEOM.d_chimney + GEOM.w_shield_back + 45 },
+    { id: "gyp_left", label: "Gypsum (Left)", temp: m.t_gypsum_max_left_c, safe: sf.gyp_left, x: state.d_chimney_mm + GEOM.t_shield + state.w_shield_mm + 45, y: 12.5 },
+    { id: "gyp_back", label: "Gypsum (Back)", temp: m.t_gypsum_max_back_c, safe: sf.gyp_back, x: 12.5, y: state.d_chimney_mm + state.w_shield_mm + 45 },
     { id: "kiln_skin", label: "Kiln Skin Max", temp: m.t_kiln_skin_max_c, safe: true, x: x_kiln - GEOM.r_kiln * Math.SQRT1_2, y: y_kiln - GEOM.r_kiln * Math.SQRT1_2 },
     { id: "shd", label: "Calsil Shield Max", temp: m.t_shield_max_c, safe: sf.shield, x: x_kiln, y: 6 },
     { id: "aac", label: "AAC Wall Max", temp: m.t_aac_max_c, safe: sf.aac, x: x_kiln, y: -100 },
@@ -1005,7 +1036,12 @@ function syncControlButtons() {
     const btns = document.querySelectorAll(`#${groupId} button`);
     btns.forEach(b => {
       const bVal = b.dataset.val;
-      b.classList.toggle('active', isNaN(val) ? (bVal === val) : (Number(bVal) === val));
+      const isActive = typeof val === 'string'
+        ? (bVal === val)
+        : (typeof val === 'boolean'
+            ? (String(bVal).toLowerCase() === String(val))
+            : (bVal !== '' && Number(bVal) === val));
+      b.classList.toggle('active', isActive);
       if (groupId === 'ctrl-gref') {
         b.disabled = (state.d_reflector_mm === 0 && Number(bVal) > 0) ||
                      (state.t_reflector_calsil_mm === 10 && Number(bVal) < 10);
@@ -1017,18 +1053,58 @@ function syncControlButtons() {
 }
 
 const URL_PARAM_SPECS = [
-  { key: 'view',  prop: 'view',                  ctrlId: 'ctrl-view',  type: 'str', allowed: ['side', 'front', 'plan'] },
-  { key: 'skiln', prop: 's_kiln_mm',             ctrlId: 'ctrl-skiln', type: 'num', allowed: [200, 300] },
-  { key: 'ukiln', prop: 'u_kiln_side',           ctrlId: 'ctrl-ukiln', type: 'num', allowed: [0.8, 0.5, 0.3] },
-  { key: 'fan',   prop: 'exhaust_fan_cfm',       ctrlId: 'ctrl-fan',   type: 'num', allowed: [350, 400, 450] },
-  { key: 'hood',  prop: 'd_hood_inlet_mm',       ctrlId: 'ctrl-hood',  type: 'num', allowed: [600, 700, 800] },
-  { key: 'hdrop', prop: 'z_hood_drop_mm',        ctrlId: 'ctrl-hdrop', type: 'num', allowed: [150, 400, 600] },
-  { key: 'dref',  prop: 'd_reflector_mm',        ctrlId: 'ctrl-dref',  type: 'num', allowed: [0, 800] },
-  { key: 'gref',  prop: 'g_floor_reflector_mm',  ctrlId: 'ctrl-gref',  type: 'num', allowed: [0, 20] },
-  { key: 'tref',  prop: 't_reflector_calsil_mm', ctrlId: 'ctrl-tref',  type: 'num', allowed: [0, 10] },
-  { key: 'tpad',  prop: 't_floor_pad_mm',        ctrlId: 'ctrl-tpad',  type: 'num', allowed: [0, 20] },
-  { key: 'door',  prop: 'w_door_open_mm',        ctrlId: 'ctrl-door',  type: 'num', allowed: [0, 150] }
+  { key: 'view',    prop: 'view',                  ctrlId: 'ctrl-view',  type: 'str',  allowed: ['side', 'front', 'plan'] },
+  { key: 'skiln',   prop: 's_kiln_mm',             ctrlId: 'ctrl-skiln', type: 'num',  dim: 's' },
+  { key: 'ukiln',   prop: 'u_kiln_side',           ctrlId: 'ctrl-ukiln', type: 'num',  dim: 'ukiln' },
+  { key: 'pad',     prop: 'w_floor_pad_mm',        ctrlId: null,         type: 'num',  dim: 'pad' },
+  { key: 'tpad',    prop: 't_floor_pad_mm',        ctrlId: 'ctrl-tpad',  type: 'num',  dim: 'tpad' },
+  { key: 'door',    prop: 'w_door_open_mm',        ctrlId: 'ctrl-door',  type: 'num',  dim: 'door' },
+  { key: 'fan',     prop: 'exhaust_fan_cfm',       ctrlId: 'ctrl-fan',   type: 'num',  dim: 'fan' },
+  { key: 'dref',    prop: 'd_reflector_mm',        ctrlId: 'ctrl-dref',  type: 'num',  refPart: 0 },
+  { key: 'tref',    prop: 't_reflector_calsil_mm', ctrlId: 'ctrl-tref',  type: 'num',  refPart: 1 },
+  { key: 'gref',    prop: 'g_floor_reflector_mm',  ctrlId: 'ctrl-gref',  type: 'num',  refPart: 2 },
+  { key: 'dchim',   prop: 'd_chimney_mm',          ctrlId: null,         type: 'num',  dim: 'dchim' },
+  { key: 'gchim',   prop: 'g_chimney_mm',          ctrlId: null,         type: 'num',  dim: 'gchim' },
+  { key: 'wshield', prop: 'w_shield_mm',           ctrlId: null,         type: 'num',  dim: 'wshield' },
+  { key: 'hood',    prop: 'd_hood_inlet_mm',       ctrlId: 'ctrl-hood',  type: 'num',  dim: 'hood' },
+  { key: 'hdrop',   prop: 'z_hood_drop_mm',        ctrlId: 'ctrl-hdrop', type: 'num',  dim: 'hdrop' },
+  { key: 'bung',    prop: 'bung_captured',         ctrlId: null,         type: 'bool', dim: 'bung' }
 ];
+
+function parseParamValue(spec, raw) {
+  if (raw === null || raw === undefined) return undefined;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return undefined;
+  if (spec.type === 'str') {
+    return trimmed.toLowerCase();
+  }
+  if (spec.type === 'bool') {
+    const normalized = trimmed.toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+    return undefined;
+  }
+  const num = Number(trimmed);
+  return Number.isFinite(num) ? num : undefined;
+}
+
+function isSpecValueAllowed(spec, val) {
+  if (val === undefined) return false;
+  if (Array.isArray(spec.allowed)) {
+    return spec.allowed.includes(val);
+  }
+  if (typeof spec.refPart === 'number') {
+    return Object.keys(SWEEP_DIMS.refCombo).some(k => Number(k.split('|')[spec.refPart]) === val);
+  }
+  if (spec.dim && SWEEP_DIMS[spec.dim]) {
+    const domain = SWEEP_DIMS[spec.dim];
+    if (spec.type === 'num') {
+      return Object.keys(domain).some(k => k !== '' && Number(k) === val);
+    }
+    return Object.prototype.hasOwnProperty.call(domain, String(val));
+  }
+  return false;
+}
 
 function loadStateFromUrl(searchOverride) {
   const rawSearch = typeof searchOverride === 'string'
@@ -1040,33 +1116,20 @@ function loadStateFromUrl(searchOverride) {
   for (const spec of URL_PARAM_SPECS) {
     const raw = params.has(spec.key) ? params.get(spec.key)
       : (params.has(spec.prop) ? params.get(spec.prop) : null);
-    if (raw === null) continue;
-    const trimmed = raw.trim();
-    if (!trimmed) continue;
-    if (spec.type === 'str') {
-      const normalized = trimmed.toLowerCase();
-      if (spec.allowed.includes(normalized)) {
-        state[spec.prop] = normalized;
-      }
-    } else {
-      const num = Number(trimmed);
-      if (Number.isFinite(num) && spec.allowed.includes(num)) {
-        state[spec.prop] = num;
-        if (spec.key === 'dref' || spec.key === 'gref' || spec.key === 'tref') {
-          seenRefKeys.add(spec.key);
-        }
+    const parsed = parseParamValue(spec, raw);
+    if (isSpecValueAllowed(spec, parsed)) {
+      state[spec.prop] = parsed;
+      if (typeof spec.refPart === 'number') {
+        seenRefKeys.add(spec.key);
       }
     }
   }
-  if (seenRefKeys.has('dref') && state.d_reflector_mm === 0) {
-    enforceValidReflectorCombo('dref');
-  } else if (seenRefKeys.has('tref') && state.t_reflector_calsil_mm === 10) {
-    enforceValidReflectorCombo('tref');
-  } else if (seenRefKeys.has('gref')) {
-    enforceValidReflectorCombo('gref');
-  } else {
-    enforceValidReflectorCombo('');
-  }
+  const refChangedKey = (seenRefKeys.has('dref') && state.d_reflector_mm === 0) ? 'dref'
+    : (seenRefKeys.has('tref') && state.t_reflector_calsil_mm === 10) ? 'tref'
+    : (seenRefKeys.has('gref') ? 'gref'
+    : (seenRefKeys.has('dref') ? 'dref'
+    : (seenRefKeys.has('tref') ? 'tref' : '')));
+  enforceValidReflectorCombo(refChangedKey);
 }
 
 function buildStateQueryString() {
@@ -1093,10 +1156,12 @@ function syncUrlFromState() {
 
 function setupControls() {
   for (const spec of URL_PARAM_SPECS) {
+    if (!spec.ctrlId) continue;
     document.querySelectorAll(`#${spec.ctrlId} button`).forEach(btn => {
       btn.addEventListener('click', () => {
-        const val = btn.dataset.val;
-        state[spec.prop] = spec.type === 'str' ? val : Number(val);
+        const parsed = parseParamValue(spec, btn.dataset.val);
+        if (parsed === undefined) return;
+        state[spec.prop] = parsed;
         enforceValidReflectorCombo(spec.key);
         syncControlButtons();
         syncUrlFromState();
@@ -1142,7 +1207,7 @@ function attachKilnDragHandler(svg) {
         c_kiln = 0.5 * (c_x + c_y);
       }
       
-      const standoff_mm = c_kiln - GEOM.t_shield - GEOM.r_kiln - GEOM.d_chimney;
+      const standoff_mm = c_kiln - GEOM.t_shield - GEOM.r_kiln - state.d_chimney_mm;
       const snapped = standoff_mm >= 250 ? 300 : 200;
       if (snapped !== state.s_kiln_mm) {
         state.s_kiln_mm = snapped;

@@ -6,7 +6,9 @@ import pathlib
 import re
 import subprocess
 import unittest
+from urllib import parse as urllib_parse
 
+import run_sweep
 from src import constants
 
 
@@ -133,6 +135,116 @@ def _baseline_safe_metrics() -> dict[str, object]:
   }
 
 
+def _default_button_groups() -> dict[str, list[str]]:
+  return {
+      "ctrl-view": ["side", "front", "plan"],
+      "ctrl-skiln": ["200", "300"],
+      "ctrl-ukiln": ["0.8", "0.5", "0.3"],
+      "ctrl-fan": ["350", "400", "450"],
+      "ctrl-hood": ["600", "700", "800"],
+      "ctrl-hdrop": ["150", "400", "600"],
+      "ctrl-dref": ["0", "800"],
+      "ctrl-gref": ["0", "20"],
+      "ctrl-tref": ["0", "10"],
+      "ctrl-tpad": ["0", "20"],
+      "ctrl-door": ["0", "150"],
+  }
+
+
+def _run_dom_explorer_js(
+    button_groups: dict[str, list[str]], body_js: str
+) -> dict[str, object]:
+  html_text = _find_kiln_explorer_path().read_text(encoding="utf-8")
+  core_script = _extract_explorer_script(html_text)
+  harness = f"""
+const __elements = {{
+  'elevation-svg': {{ innerHTML: '', setAttribute() {{}} }},
+  'header-subtitle': {{ textContent: '' }},
+  'drag-hint-msg': {{ textContent: '' }},
+  'plume-summary': {{ textContent: '' }},
+  'metric-list': {{ innerHTML: '' }},
+}};
+const __buttonSpec = {json.dumps(button_groups)};
+const __buttonMap = {{}};
+for (const [gid, vals] of Object.entries(__buttonSpec)) {{
+  __buttonMap[gid] = vals.map(v => {{
+    const btn = {{
+      dataset: {{ val: v }},
+      disabled: false,
+      _active: false,
+      _handlers: {{}},
+      classList: {{ toggle(cls, on) {{ if (cls === 'active') btn._active = Boolean(on); }} }},
+      addEventListener(ev, fn) {{ btn._handlers[ev] = fn; }},
+      click() {{ if (btn._handlers.click) btn._handlers.click(); }},
+    }};
+    return btn;
+  }});
+}}
+globalThis.document = {{
+  getElementById(id) {{
+    if (!__elements[id] && id.startsWith('lbl-')) {{
+      __elements[id] = {{ textContent: '' }};
+    }}
+    return __elements[id] || null;
+  }},
+  querySelectorAll(sel) {{
+    const m = /^#([a-z-]+) button$/.exec(sel);
+    return m && __buttonMap[m[1]] ? __buttonMap[m[1]] : [];
+  }},
+}};
+const __replaceCalls = [];
+globalThis.window = globalThis;
+globalThis.window.location = {{ pathname: '/kiln_explorer.html', search: '', hash: '' }};
+globalThis.window.history = {{
+  replaceState(_s, _t, url) {{
+    __replaceCalls.push(url);
+    const qIdx = url.indexOf('?');
+    globalThis.window.location.search = qIdx >= 0 ? url.slice(qIdx) : '';
+  }},
+}};
+{core_script}
+getMetricsForState = () => ({json.dumps(_baseline_safe_metrics())});
+function resetDefaults() {{
+  Object.assign(state, {{
+    view: 'plan',
+    s_kiln_mm: 300,
+    u_kiln_side: 0.8,
+    w_floor_pad_mm: 1200,
+    t_floor_pad_mm: 20,
+    w_door_open_mm: 150,
+    exhaust_fan_cfm: 400,
+    d_reflector_mm: 800,
+    t_reflector_calsil_mm: 0,
+    g_floor_reflector_mm: 20,
+    d_chimney_mm: 0,
+    g_chimney_mm: 0,
+    w_shield_mm: 1200,
+    d_hood_inlet_mm: 800,
+    z_hood_drop_mm: 400,
+    bung_captured: true,
+  }});
+}}
+if (typeof loadStateFromUrl !== 'function') {{
+  throw new Error('loadStateFromUrl is not defined');
+}}
+if (typeof syncUrlFromState !== 'function') {{
+  throw new Error('syncUrlFromState is not defined');
+}}
+{body_js}
+"""
+  proc = subprocess.run(
+      ["/usr/bin/node", "-e", harness],
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  if proc.returncode != 0:
+    raise AssertionError(
+        f"Node harness failed (rc={proc.returncode}): {proc.stderr}"
+    )
+  return json.loads(proc.stdout)
+
+
 class KilnExplorerSafetyTest(unittest.TestCase):
   """Tests UI safety limits and flag consistency across views and sidebar."""
 
@@ -223,104 +335,24 @@ class KilnExplorerSafetyTest(unittest.TestCase):
       )
 
   def test_url_parameter_parsing_and_button_click_url_updates(self) -> None:
-    html_text = _find_kiln_explorer_path().read_text(encoding="utf-8")
-    core_script = _extract_explorer_script(html_text)
-    button_groups = {
-        "ctrl-view": ["side", "front", "plan"],
-        "ctrl-skiln": ["200", "300"],
-        "ctrl-ukiln": ["0.8", "0.5", "0.3"],
-        "ctrl-fan": ["350", "400", "450"],
-        "ctrl-hood": ["600", "700", "800"],
-        "ctrl-hdrop": ["150", "400", "600"],
-        "ctrl-dref": ["0", "800"],
-        "ctrl-gref": ["0", "20"],
-        "ctrl-tref": ["0", "10"],
-        "ctrl-tpad": ["0", "20"],
-        "ctrl-door": ["0", "150"],
-    }
-    harness = f"""
-const __elements = {{
-  'elevation-svg': {{ innerHTML: '', setAttribute() {{}} }},
-  'header-subtitle': {{ textContent: '' }},
-  'drag-hint-msg': {{ textContent: '' }},
-  'plume-summary': {{ textContent: '' }},
-  'metric-list': {{ innerHTML: '' }},
-}};
-const __buttonSpec = {json.dumps(button_groups)};
-const __buttonMap = {{}};
-for (const [gid, vals] of Object.entries(__buttonSpec)) {{
-  __buttonMap[gid] = vals.map(v => ({{
-    dataset: {{ val: v }},
-    disabled: false,
-    _active: false,
-    _handlers: {{}},
-    classList: {{ toggle(cls, on) {{ if (cls === 'active') this._active = Boolean(on); }} }},
-    addEventListener(ev, fn) {{ this._handlers[ev] = fn; }},
-    click() {{ if (this._handlers.click) this._handlers.click(); }},
-  }}));
-}}
-globalThis.document = {{
-  getElementById(id) {{
-    if (!__elements[id] && id.startsWith('lbl-')) {{
-      __elements[id] = {{ textContent: '' }};
-    }}
-    return __elements[id] || null;
-  }},
-  querySelectorAll(sel) {{
-    const m = /^#([a-z-]+) button$/.exec(sel);
-    return m && __buttonMap[m[1]] ? __buttonMap[m[1]] : [];
-  }},
-}};
-const __replaceCalls = [];
-globalThis.window = globalThis;
-globalThis.window.location = {{ pathname: '/kiln_explorer.html', search: '', hash: '' }};
-globalThis.window.history = {{
-  replaceState(_s, _t, url) {{
-    __replaceCalls.push(url);
-    const qIdx = url.indexOf('?');
-    globalThis.window.location.search = qIdx >= 0 ? url.slice(qIdx) : '';
-  }},
-}};
-{core_script}
-getMetricsForState = () => ({json.dumps(_baseline_safe_metrics())});
-function resetDefaults() {{
-  Object.assign(state, {{
-    view: 'plan',
-    s_kiln_mm: 300,
-    u_kiln_side: 0.8,
-    exhaust_fan_cfm: 400,
-    d_hood_inlet_mm: 800,
-    z_hood_drop_mm: 400,
-    d_reflector_mm: 800,
-    g_floor_reflector_mm: 20,
-    t_reflector_calsil_mm: 0,
-    w_floor_pad_mm: 1200,
-    t_floor_pad_mm: 20,
-    w_door_open_mm: 150,
-  }});
-}}
-if (typeof loadStateFromUrl !== 'function') {{
-  throw new Error('loadStateFromUrl is not defined');
-}}
-if (typeof syncUrlFromState !== 'function') {{
-  throw new Error('syncUrlFromState is not defined');
-}}
-
+    res = _run_dom_explorer_js(
+        _default_button_groups(),
+        """
 resetDefaults();
 loadStateFromUrl('?view=front&skiln=200&ukiln=0.3&fan=450&hood=600&hdrop=150&dref=800&gref=20&tref=10&tpad=0&door=0');
-const fullParsed = {{ ...state }};
+const fullParsed = { ...state };
 
 resetDefaults();
 loadStateFromUrl('?dref=0');
-const drefZero = {{ ...state }};
+const drefZero = { ...state };
 
 resetDefaults();
 loadStateFromUrl('?dref=800&gref=0&tref=10');
-const trefNeedsGap = {{ ...state }};
+const trefNeedsGap = { ...state };
 
 resetDefaults();
 loadStateFromUrl('?view=bogus&skiln=999&ukiln=abc&fan=-5');
-const invalidIgnored = {{ ...state }};
+const invalidIgnored = { ...state };
 
 resetDefaults();
 setupControls();
@@ -329,15 +361,15 @@ __buttonMap['ctrl-view'].find(b => b.dataset.val === 'side').click();
 __buttonMap['ctrl-skiln'].find(b => b.dataset.val === '200').click();
 __buttonMap['ctrl-dref'].find(b => b.dataset.val === '0').click();
 __buttonMap['ctrl-hdrop'].find(b => b.dataset.val === '150').click();
-const clickedState = {{ ...state }};
+const clickedState = { ...state };
 const clickedUrl = __replaceCalls[__replaceCalls.length - 1] || '';
 
 resetDefaults();
 const qIdx = clickedUrl.indexOf('?');
 loadStateFromUrl(qIdx >= 0 ? clickedUrl.slice(qIdx) : '');
-const roundTripState = {{ ...state }};
+const roundTripState = { ...state };
 
-process.stdout.write(JSON.stringify({{
+process.stdout.write(JSON.stringify({
   fullParsed,
   drefZero,
   trefNeedsGap,
@@ -346,19 +378,9 @@ process.stdout.write(JSON.stringify({{
   clickedUrl,
   clickedState,
   roundTripState,
-}}));
-"""
-    proc = subprocess.run(
-        ["/usr/bin/node", "-e", harness],
-        capture_output=True,
-        text=True,
+}));
+""",
     )
-    self.assertEqual(
-        proc.returncode,
-        0,
-        f"Node harness failed (rc={proc.returncode}): {proc.stderr}",
-    )
-    res = json.loads(proc.stdout)
 
     self.assertEqual(res["fullParsed"]["view"], "front")
     self.assertEqual(res["fullParsed"]["s_kiln_mm"], 200)
@@ -391,6 +413,186 @@ process.stdout.write(JSON.stringify({{
     self.assertIn("dref=0", res["clickedUrl"])
     self.assertIn("hdrop=150", res["clickedUrl"])
     self.assertEqual(res["roundTripState"], res["clickedState"])
+
+  def test_all_dataset_params_in_url_and_unmatched_controls_unselected(
+      self,
+  ) -> None:
+    omitted_hood_buttons = _default_button_groups()
+    omitted_hood_buttons["ctrl-hood"] = ["700", "800"]
+
+    res = _run_dom_explorer_js(
+        omitted_hood_buttons,
+        """
+const datasetProps = URL_PARAM_SPECS
+  .filter(s => s.key !== 'view')
+  .map(s => s.prop);
+resetDefaults();
+const defaultQuery = buildStateQueryString();
+
+resetDefaults();
+loadStateFromUrl('?pad=1200&dchim=0&gchim=0&wshield=1200&bung=true');
+const shortSingleState = { ...state };
+
+resetDefaults();
+loadStateFromUrl(
+  '?s_kiln_mm=200.0&u_kiln_side=0.5&w_floor_pad_mm=1200.0&t_floor_pad_mm=0.0' +
+  '&w_door_open_mm=0.0&exhaust_fan_cfm=350.0&d_reflector_mm=800.0' +
+  '&t_reflector_calsil_mm=0.0&g_floor_reflector_mm=0.0&d_chimney_mm=0.0' +
+  '&g_chimney_mm=0.0&w_shield_mm=1200.0&d_hood_inlet_mm=700.0' +
+  '&z_hood_drop_mm=600.0&bung_captured=True'
+);
+const fullCsvState = { ...state };
+
+// Case A: dataset-valid hood=600 when #ctrl-hood omits "600".
+setupControls();
+resetDefaults();
+loadStateFromUrl('?hood=600');
+syncControlButtons();
+syncUrlFromState();
+const caseA = {
+  hoodVal: state.d_hood_inlet_mm,
+  hoodLabel: __elements['lbl-hood'].textContent,
+  hoodActive: __buttonMap['ctrl-hood'].map(b => b._active),
+  urlBeforeClick: __replaceCalls[__replaceCalls.length - 1] || '',
+};
+__buttonMap['ctrl-door'].find(b => b.dataset.val === '0').click();
+caseA.urlAfterDoorClick = __replaceCalls[__replaceCalls.length - 1] || '';
+
+// Case B: dynamically extend SWEEP_DIMS with values not in HTML buttons.
+SWEEP_DIMS.fan[500] = 0;
+SWEEP_DIMS.wshield[1000] = 0;
+SWEEP_DIMS.bung[false] = 0;
+SWEEP_DIMS.refCombo['600|5|15'] = 4;
+
+resetDefaults();
+loadStateFromUrl('?fan=500&wshield=1000&bung=false&dref=600&tref=5&gref=15');
+syncControlButtons();
+syncUrlFromState();
+const caseB = {
+  stateAfterValid: { ...state },
+  labels: {
+    fan: __elements['lbl-fan'].textContent,
+    dref: __elements['lbl-dref'].textContent,
+    tref: __elements['lbl-tref'].textContent,
+    gref: __elements['lbl-gref'].textContent,
+  },
+  activeFlags: {
+    fan: __buttonMap['ctrl-fan'].map(b => b._active),
+    dref: __buttonMap['ctrl-dref'].map(b => b._active),
+    tref: __buttonMap['ctrl-tref'].map(b => b._active),
+    gref: __buttonMap['ctrl-gref'].map(b => b._active),
+  },
+  urlAfterValid: __replaceCalls[__replaceCalls.length - 1] || '',
+};
+loadStateFromUrl('?fan=999&wshield=777&dchim=25');
+caseB.stateAfterInvalid = { ...state };
+
+// Case C: clicking a button afterward re-selects that control cleanly.
+__buttonMap['ctrl-fan'].find(b => b.dataset.val === '400').click();
+const caseC = {
+  fanVal: state.exhaust_fan_cfm,
+  fanActive: __buttonMap['ctrl-fan'].map(b => b._active),
+  urlAfterClick: __replaceCalls[__replaceCalls.length - 1] || '',
+};
+
+process.stdout.write(JSON.stringify({
+  datasetProps,
+  defaultQuery,
+  shortSingleState,
+  fullCsvState,
+  caseA,
+  caseB,
+  caseC,
+}));
+""",
+    )
+
+    self.assertEqual(
+        set(res["datasetProps"]),
+        set(run_sweep.SWEEP_PARAM_COLUMNS),
+    )
+
+    default_query_params = urllib_parse.parse_qs(
+        res["defaultQuery"].lstrip("?"), keep_blank_values=True
+    )
+    expected_url_keys = {
+        "view",
+        "skiln",
+        "ukiln",
+        "pad",
+        "tpad",
+        "door",
+        "fan",
+        "dref",
+        "tref",
+        "gref",
+        "dchim",
+        "gchim",
+        "wshield",
+        "hood",
+        "hdrop",
+        "bung",
+    }
+    self.assertEqual(set(default_query_params.keys()), expected_url_keys)
+
+    self.assertEqual(res["shortSingleState"]["w_floor_pad_mm"], 1200)
+    self.assertEqual(res["shortSingleState"]["d_chimney_mm"], 0)
+    self.assertEqual(res["shortSingleState"]["g_chimney_mm"], 0)
+    self.assertEqual(res["shortSingleState"]["w_shield_mm"], 1200)
+    self.assertIs(res["shortSingleState"]["bung_captured"], True)
+
+    csv_state = res["fullCsvState"]
+    self.assertEqual(csv_state["s_kiln_mm"], 200)
+    self.assertAlmostEqual(csv_state["u_kiln_side"], 0.5)
+    self.assertEqual(csv_state["w_floor_pad_mm"], 1200)
+    self.assertEqual(csv_state["t_floor_pad_mm"], 0)
+    self.assertEqual(csv_state["w_door_open_mm"], 0)
+    self.assertEqual(csv_state["exhaust_fan_cfm"], 350)
+    self.assertEqual(csv_state["d_reflector_mm"], 800)
+    self.assertEqual(csv_state["t_reflector_calsil_mm"], 0)
+    self.assertEqual(csv_state["g_floor_reflector_mm"], 0)
+    self.assertEqual(csv_state["d_chimney_mm"], 0)
+    self.assertEqual(csv_state["g_chimney_mm"], 0)
+    self.assertEqual(csv_state["w_shield_mm"], 1200)
+    self.assertEqual(csv_state["d_hood_inlet_mm"], 700)
+    self.assertEqual(csv_state["z_hood_drop_mm"], 600)
+    self.assertIs(csv_state["bung_captured"], True)
+
+    # Case A assertions.
+    self.assertEqual(res["caseA"]["hoodVal"], 600)
+    self.assertEqual(res["caseA"]["hoodLabel"], "600 mm")
+    self.assertEqual(res["caseA"]["hoodActive"], [False, False])
+    self.assertIn("hood=600", res["caseA"]["urlBeforeClick"])
+    self.assertIn("hood=600", res["caseA"]["urlAfterDoorClick"])
+    self.assertIn("door=0", res["caseA"]["urlAfterDoorClick"])
+
+    # Case B assertions.
+    sb = res["caseB"]["stateAfterValid"]
+    self.assertEqual(sb["exhaust_fan_cfm"], 500)
+    self.assertEqual(sb["w_shield_mm"], 1000)
+    self.assertIs(sb["bung_captured"], False)
+    self.assertEqual(sb["d_reflector_mm"], 600)
+    self.assertEqual(sb["t_reflector_calsil_mm"], 5)
+    self.assertEqual(sb["g_floor_reflector_mm"], 15)
+    self.assertEqual(res["caseB"]["labels"]["fan"], "500 CFM")
+    self.assertEqual(res["caseB"]["labels"]["dref"], "600 mm")
+    self.assertEqual(res["caseB"]["labels"]["tref"], "5 mm")
+    self.assertEqual(res["caseB"]["labels"]["gref"], "15 mm")
+    for ctrl in ("fan", "dref", "tref", "gref"):
+      self.assertEqual(res["caseB"]["activeFlags"][ctrl], [False] * len(res["caseB"]["activeFlags"][ctrl]))
+    self.assertIn("fan=500", res["caseB"]["urlAfterValid"])
+    self.assertIn("wshield=1000", res["caseB"]["urlAfterValid"])
+    self.assertIn("bung=false", res["caseB"]["urlAfterValid"])
+
+    sb_invalid = res["caseB"]["stateAfterInvalid"]
+    self.assertEqual(sb_invalid["exhaust_fan_cfm"], 500)
+    self.assertEqual(sb_invalid["w_shield_mm"], 1000)
+    self.assertEqual(sb_invalid["d_chimney_mm"], 0)
+
+    # Case C assertions.
+    self.assertEqual(res["caseC"]["fanVal"], 400)
+    self.assertEqual(res["caseC"]["fanActive"], [False, True, False])
+    self.assertIn("fan=400", res["caseC"]["urlAfterClick"])
 
 
 if __name__ == "__main__":
