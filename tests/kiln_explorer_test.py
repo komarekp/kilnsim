@@ -1,5 +1,6 @@
 """Unit tests verifying safety threshold consistency in kiln_explorer.html."""
 
+from html import parser as html_parser
 import json
 import os
 import pathlib
@@ -135,12 +136,53 @@ def _baseline_safe_metrics() -> dict[str, object]:
   }
 
 
+class _ButtonGroupParser(html_parser.HTMLParser):
+  """Extracts <button data-val="..."> values inside .btn-group controls."""
+
+  def __init__(self) -> None:
+    super().__init__()
+    self.groups: dict[str, list[str]] = {}
+    self._current_group: str | None = None
+    self._div_depth = 0
+
+  def handle_starttag(
+      self, tag: str, attrs: list[tuple[str, str | None]]
+  ) -> None:
+    attr_map = dict(attrs)
+    if tag == "div":
+      classes = (attr_map.get("class") or "").split()
+      div_id = attr_map.get("id")
+      if "btn-group" in classes and div_id and div_id.startswith("ctrl-"):
+        self._current_group = div_id
+        self._div_depth = 1
+        self.groups[div_id] = []
+      elif self._current_group is not None:
+        self._div_depth += 1
+    elif tag == "button" and self._current_group is not None:
+      val = attr_map.get("data-val")
+      if val is not None:
+        self.groups[self._current_group].append(val)
+
+  def handle_endtag(self, tag: str) -> None:
+    if tag == "div" and self._current_group is not None:
+      self._div_depth -= 1
+      if self._div_depth <= 0:
+        self._current_group = None
+
+
+def _parse_html_button_groups(html_text: str) -> dict[str, list[str]]:
+  parser = _ButtonGroupParser()
+  parser.feed(html_text)
+  parser.close()
+  return parser.groups
+
+
 def _default_button_groups() -> dict[str, list[str]]:
   return {
       "ctrl-view": ["side", "front", "plan"],
       "ctrl-skiln": ["200", "300"],
       "ctrl-ukiln": ["0.8", "0.5", "0.3"],
-      "ctrl-fan": ["350", "400", "450"],
+      "ctrl-fan": ["300", "350", "400"],
       "ctrl-hood": ["600", "700", "800"],
       "ctrl-hdrop": ["150", "400", "600"],
       "ctrl-dref": ["0", "800"],
@@ -417,6 +459,11 @@ process.stdout.write(JSON.stringify({
   def test_all_dataset_params_in_url_and_unmatched_controls_unselected(
       self,
   ) -> None:
+    html_text = _find_kiln_explorer_path().read_text(encoding="utf-8")
+    self.assertEqual(
+        _parse_html_button_groups(html_text), _default_button_groups()
+    )
+
     omitted_hood_buttons = _default_button_groups()
     omitted_hood_buttons["ctrl-hood"] = ["700", "800"]
 
@@ -457,6 +504,30 @@ const caseA = {
 };
 __buttonMap['ctrl-door'].find(b => b.dataset.val === '0').click();
 caseA.urlAfterDoorClick = __replaceCalls[__replaceCalls.length - 1] || '';
+
+// Check real dataset fan values 300 (matched button) and 450 (unmatched button)
+// before mutating SWEEP_DIMS.
+resetDefaults();
+loadStateFromUrl('?fan=300');
+syncControlButtons();
+syncUrlFromState();
+const realFan300 = {
+  fanVal: state.exhaust_fan_cfm,
+  fanLabel: __elements['lbl-fan'].textContent,
+  fanActive: __buttonMap['ctrl-fan'].map(b => b._active),
+  url: __replaceCalls[__replaceCalls.length - 1] || '',
+};
+
+resetDefaults();
+loadStateFromUrl('?fan=450');
+syncControlButtons();
+syncUrlFromState();
+const realFan450 = {
+  fanVal: state.exhaust_fan_cfm,
+  fanLabel: __elements['lbl-fan'].textContent,
+  fanActive: __buttonMap['ctrl-fan'].map(b => b._active),
+  url: __replaceCalls[__replaceCalls.length - 1] || '',
+};
 
 // Case B: dynamically extend SWEEP_DIMS with values not in HTML buttons.
 SWEEP_DIMS.fan[500] = 0;
@@ -501,6 +572,8 @@ process.stdout.write(JSON.stringify({
   shortSingleState,
   fullCsvState,
   caseA,
+  realFan300,
+  realFan450,
   caseB,
   caseC,
 }));
@@ -566,6 +639,17 @@ process.stdout.write(JSON.stringify({
     self.assertIn("hood=600", res["caseA"]["urlAfterDoorClick"])
     self.assertIn("door=0", res["caseA"]["urlAfterDoorClick"])
 
+    # Real 300 / 450 CFM dataset values against 300/350/400 UI buttons.
+    self.assertEqual(res["realFan300"]["fanVal"], 300)
+    self.assertEqual(res["realFan300"]["fanLabel"], "300 CFM")
+    self.assertEqual(res["realFan300"]["fanActive"], [True, False, False])
+    self.assertIn("fan=300", res["realFan300"]["url"])
+
+    self.assertEqual(res["realFan450"]["fanVal"], 450)
+    self.assertEqual(res["realFan450"]["fanLabel"], "450 CFM")
+    self.assertEqual(res["realFan450"]["fanActive"], [False, False, False])
+    self.assertIn("fan=450", res["realFan450"]["url"])
+
     # Case B assertions.
     sb = res["caseB"]["stateAfterValid"]
     self.assertEqual(sb["exhaust_fan_cfm"], 500)
@@ -591,7 +675,7 @@ process.stdout.write(JSON.stringify({
 
     # Case C assertions.
     self.assertEqual(res["caseC"]["fanVal"], 400)
-    self.assertEqual(res["caseC"]["fanActive"], [False, True, False])
+    self.assertEqual(res["caseC"]["fanActive"], [False, False, True])
     self.assertIn("fan=400", res["caseC"]["urlAfterClick"])
 
 

@@ -272,7 +272,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
         {pt.z_hood_drop_mm for pt in all_points}, {600.0, 400.0, 150.0}
     )
     self.assertEqual(
-        {pt.exhaust_fan_cfm for pt in all_points}, {350.0, 400.0, 450.0}
+        {pt.exhaust_fan_cfm for pt in all_points}, {300.0, 350.0, 400.0}
     )
 
     pt1 = all_points[0]
