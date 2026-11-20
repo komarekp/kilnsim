@@ -182,7 +182,7 @@ def _default_button_groups() -> dict[str, list[str]]:
       "ctrl-view": ["side", "front", "plan"],
       "ctrl-skiln": ["200", "300"],
       "ctrl-ukiln": ["0.8", "0.5", "0.3"],
-      "ctrl-fan": ["300", "350", "400"],
+      "ctrl-fan": ["200", "250", "300", "350", "400"],
       "ctrl-hood": ["600", "700", "800"],
       "ctrl-hdrop": ["150", "400", "600", "800", "1000"],
       "ctrl-dref": ["0", "800"],
@@ -505,8 +505,19 @@ const caseA = {
 __buttonMap['ctrl-door'].find(b => b.dataset.val === '0').click();
 caseA.urlAfterDoorClick = __replaceCalls[__replaceCalls.length - 1] || '';
 
-// Check real dataset fan values 300 (matched button) and 450 (unmatched button)
+// Check real dataset fan values 200, 300 (matched buttons) and 450 (unmatched button)
 // before mutating SWEEP_DIMS.
+resetDefaults();
+loadStateFromUrl('?fan=200');
+syncControlButtons();
+syncUrlFromState();
+const realFan200 = {
+  fanVal: state.exhaust_fan_cfm,
+  fanLabel: __elements['lbl-fan'].textContent,
+  fanActive: __buttonMap['ctrl-fan'].map(b => b._active),
+  url: __replaceCalls[__replaceCalls.length - 1] || '',
+};
+
 resetDefaults();
 loadStateFromUrl('?fan=300');
 syncControlButtons();
@@ -572,6 +583,7 @@ process.stdout.write(JSON.stringify({
   shortSingleState,
   fullCsvState,
   caseA,
+  realFan200,
   realFan300,
   realFan450,
   caseB,
@@ -639,15 +651,20 @@ process.stdout.write(JSON.stringify({
     self.assertIn("hood=600", res["caseA"]["urlAfterDoorClick"])
     self.assertIn("door=0", res["caseA"]["urlAfterDoorClick"])
 
-    # Real 300 / 450 CFM dataset values against 300/350/400 UI buttons.
+    # Real 200 / 300 / 450 CFM dataset values against 200/250/300/350/400 UI buttons.
+    self.assertEqual(res["realFan200"]["fanVal"], 200)
+    self.assertEqual(res["realFan200"]["fanLabel"], "200 CFM")
+    self.assertEqual(res["realFan200"]["fanActive"], [True, False, False, False, False])
+    self.assertIn("fan=200", res["realFan200"]["url"])
+
     self.assertEqual(res["realFan300"]["fanVal"], 300)
     self.assertEqual(res["realFan300"]["fanLabel"], "300 CFM")
-    self.assertEqual(res["realFan300"]["fanActive"], [True, False, False])
+    self.assertEqual(res["realFan300"]["fanActive"], [False, False, True, False, False])
     self.assertIn("fan=300", res["realFan300"]["url"])
 
     self.assertEqual(res["realFan450"]["fanVal"], 450)
     self.assertEqual(res["realFan450"]["fanLabel"], "450 CFM")
-    self.assertEqual(res["realFan450"]["fanActive"], [False, False, False])
+    self.assertEqual(res["realFan450"]["fanActive"], [False, False, False, False, False])
     self.assertIn("fan=450", res["realFan450"]["url"])
 
     # Case B assertions.
@@ -675,7 +692,7 @@ process.stdout.write(JSON.stringify({
 
     # Case C assertions.
     self.assertEqual(res["caseC"]["fanVal"], 400)
-    self.assertEqual(res["caseC"]["fanActive"], [False, False, True])
+    self.assertEqual(res["caseC"]["fanActive"], [False, False, False, False, True])
     self.assertIn("fan=400", res["caseC"]["urlAfterClick"])
 
 
