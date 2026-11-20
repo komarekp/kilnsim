@@ -190,6 +190,7 @@ def _default_button_groups() -> dict[str, list[str]]:
       "ctrl-tref": ["0", "10"],
       "ctrl-tpad": ["0", "20"],
       "ctrl-door": ["0", "150"],
+      "ctrl-tamb": ["20", "30", "35"],
   }
 
 
@@ -264,6 +265,7 @@ function resetDefaults() {{
     d_hood_inlet_mm: 800,
     z_hood_drop_mm: 400,
     bung_captured: true,
+    t_ext_c: 20,
   }});
 }}
 if (typeof loadStateFromUrl !== 'function') {{
@@ -381,7 +383,7 @@ class KilnExplorerSafetyTest(unittest.TestCase):
         _default_button_groups(),
         """
 resetDefaults();
-loadStateFromUrl('?view=front&skiln=200&ukiln=0.3&fan=450&hood=600&hdrop=150&dref=800&gref=20&tref=10&tpad=0&door=0');
+loadStateFromUrl('?view=front&skiln=200&ukiln=0.3&fan=450&hood=600&hdrop=150&dref=800&gref=20&tref=10&tpad=0&door=0&tamb=30');
 const fullParsed = { ...state };
 
 resetDefaults();
@@ -403,6 +405,7 @@ __buttonMap['ctrl-view'].find(b => b.dataset.val === 'side').click();
 __buttonMap['ctrl-skiln'].find(b => b.dataset.val === '200').click();
 __buttonMap['ctrl-dref'].find(b => b.dataset.val === '0').click();
 __buttonMap['ctrl-hdrop'].find(b => b.dataset.val === '150').click();
+__buttonMap['ctrl-tamb'].find(b => b.dataset.val === '35').click();
 const clickedState = { ...state };
 const clickedUrl = __replaceCalls[__replaceCalls.length - 1] || '';
 
@@ -435,6 +438,7 @@ process.stdout.write(JSON.stringify({
     self.assertEqual(res["fullParsed"]["t_reflector_calsil_mm"], 10)
     self.assertEqual(res["fullParsed"]["t_floor_pad_mm"], 0)
     self.assertEqual(res["fullParsed"]["w_door_open_mm"], 0)
+    self.assertEqual(res["fullParsed"]["t_ext_c"], 30)
 
     self.assertEqual(res["drefZero"]["d_reflector_mm"], 0)
     self.assertEqual(res["drefZero"]["g_floor_reflector_mm"], 0)
@@ -454,6 +458,7 @@ process.stdout.write(JSON.stringify({
     self.assertIn("skiln=200", res["clickedUrl"])
     self.assertIn("dref=0", res["clickedUrl"])
     self.assertIn("hdrop=150", res["clickedUrl"])
+    self.assertIn("tamb=35", res["clickedUrl"])
     self.assertEqual(res["roundTripState"], res["clickedState"])
 
   def test_all_dataset_params_in_url_and_unmatched_controls_unselected(
@@ -486,7 +491,7 @@ loadStateFromUrl(
   '&w_door_open_mm=0.0&exhaust_fan_cfm=350.0&d_reflector_mm=800.0' +
   '&t_reflector_calsil_mm=0.0&g_floor_reflector_mm=0.0&d_chimney_mm=0.0' +
   '&g_chimney_mm=0.0&w_shield_mm=1200.0&d_hood_inlet_mm=700.0' +
-  '&z_hood_drop_mm=600.0&bung_captured=True'
+  '&z_hood_drop_mm=600.0&bung_captured=True&t_ext_c=35.0'
 );
 const fullCsvState = { ...state };
 
@@ -540,6 +545,17 @@ const realFan450 = {
   url: __replaceCalls[__replaceCalls.length - 1] || '',
 };
 
+resetDefaults();
+loadStateFromUrl('?tamb=30');
+syncControlButtons();
+syncUrlFromState();
+const realTamb30 = {
+  tambVal: state.t_ext_c,
+  tambLabel: __elements['lbl-tamb'].textContent,
+  tambActive: __buttonMap['ctrl-tamb'].map(b => b._active),
+  url: __replaceCalls[__replaceCalls.length - 1] || '',
+};
+
 // Case B: dynamically extend SWEEP_DIMS with values not in HTML buttons.
 SWEEP_DIMS.fan[500] = 0;
 SWEEP_DIMS.wshield[1000] = 0;
@@ -586,6 +602,7 @@ process.stdout.write(JSON.stringify({
   realFan200,
   realFan300,
   realFan450,
+  realTamb30,
   caseB,
   caseC,
 }));
@@ -617,6 +634,7 @@ process.stdout.write(JSON.stringify({
         "hood",
         "hdrop",
         "bung",
+        "tamb",
     }
     self.assertEqual(set(default_query_params.keys()), expected_url_keys)
 
@@ -642,6 +660,7 @@ process.stdout.write(JSON.stringify({
     self.assertEqual(csv_state["d_hood_inlet_mm"], 700)
     self.assertEqual(csv_state["z_hood_drop_mm"], 600)
     self.assertIs(csv_state["bung_captured"], True)
+    self.assertEqual(csv_state["t_ext_c"], 35)
 
     # Case A assertions.
     self.assertEqual(res["caseA"]["hoodVal"], 600)
@@ -666,6 +685,11 @@ process.stdout.write(JSON.stringify({
     self.assertEqual(res["realFan450"]["fanLabel"], "450 CFM")
     self.assertEqual(res["realFan450"]["fanActive"], [False, False, False, False, False])
     self.assertIn("fan=450", res["realFan450"]["url"])
+
+    self.assertEqual(res["realTamb30"]["tambVal"], 30)
+    self.assertEqual(res["realTamb30"]["tambLabel"], "30 °C")
+    self.assertEqual(res["realTamb30"]["tambActive"], [False, True, False])
+    self.assertIn("tamb=30", res["realTamb30"]["url"])
 
     # Case B assertions.
     sb = res["caseB"]["stateAfterValid"]

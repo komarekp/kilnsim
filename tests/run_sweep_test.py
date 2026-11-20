@@ -219,6 +219,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
           "d_hood_inlet_mm",
           "z_hood_drop_mm",
           "bung_captured",
+          "t_ext_c",
       ]
       for col in expected_param_cols:
         self.assertIn(col, headers)
@@ -238,6 +239,14 @@ class RunSweepAndLoggingTest(unittest.TestCase):
       row_dict = dict(zip(headers, lines[1].split(",")))
       self.assertGreater(float(row_dict["t_kiln_skin_max_c"]), 50.0)
       self.assertGreater(float(row_dict["t_exhaust_duct_c"]), 20.0)
+      self.assertAlmostEqual(float(row_dict["t_ext_c"]), 20.0, places=5)
+
+      # Verify non-default t_ext_c appends _tamb suffix and populates config.
+      self.assertNotIn("_tamb", point.experiment_name)
+      point_30 = dataclasses.replace(point, t_ext_c=30.0)
+      self.assertTrue(point_30.experiment_name.endswith("_tamb30"))
+      cfg_30 = run_sweep.build_config_proto(point_30)
+      self.assertAlmostEqual(cfg_30.thermal.sources.t_ext_c, 30.0, places=5)
 
       # Also verify legacy .out.textproto files without t_kiln_skin_max_c in the
       # metrics block have t_kiln_skin_max_c backfilled from KILN_SIDE patches.
@@ -277,6 +286,11 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     self.assertEqual(
         {pt.exhaust_fan_cfm for pt in all_points},
         {200.0, 250.0, 300.0, 350.0, 400.0},
+    )
+    self.assertEqual(run_sweep.AMBIENT_TEMPS_C, (20.0, 30.0, 35.0))
+    self.assertEqual(
+        {pt.t_ext_c for pt in all_points},
+        {20.0, 30.0, 35.0},
     )
 
     pt1 = all_points[0]

@@ -112,6 +112,7 @@ SHIELD_WIDTHS_MM: tuple[float, ...] = (1200.0,)
 HOOD_INLETS_MM: tuple[float, ...] = (600, 700.0, 800.0)
 HOOD_DROP_MM: tuple[float, ...] = (1000.0, 800.0, 600.0, 400.0, 150.0)
 BUNG_CAPTURED_VALUES: tuple[bool, ...] = (True,)
+AMBIENT_TEMPS_C: tuple[float, ...] = (20.0, 30.0, 35.0)
 
 def _fmt_num(val: float) -> str:
   """Formats a numeric parameter value concisely for filenames."""
@@ -139,11 +140,12 @@ class SweepPoint:
   bung_captured: bool
   u_kiln_side: float = 0.8
   z_hood_drop_mm: float = 400.0
+  t_ext_c: float = constants.DEFAULT_EXT_TEMP_C
 
   @property
   def experiment_name(self) -> str:
     """Returns a deterministic experiment identifier and filename stem."""
-    return (
+    base_name = (
         f"standoff{_fmt_num(self.s_kiln_mm)}_"
         f"ukiln{_fmt_num(self.u_kiln_side)}_"
         f"pad{_fmt_num(self.w_floor_pad_mm)}x{_fmt_num(self.t_floor_pad_mm)}_"
@@ -155,6 +157,9 @@ class SweepPoint:
         f"door{_fmt_num(self.w_door_open_mm)}_"
         f"cfm{_fmt_num(self.exhaust_fan_cfm)}"
     )
+    if abs(self.t_ext_c - constants.DEFAULT_EXT_TEMP_C) < 1e-9:
+      return base_name
+    return f"{base_name}_tamb{_fmt_num(self.t_ext_c)}"
 
   @property
   def geometry_cache_key(self) -> tuple[float, ...]:
@@ -200,6 +205,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
       bung_cap,
       w_door,
       cfm,
+      t_ext_c,
   ) in itertools.product(
       KILN_STANDOFFS_MM,
       PAD_SIZES_MM,
@@ -216,6 +222,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
       BUNG_CAPTURED_VALUES,
       DOOR_OPEN_VALUES_MM,
       CFM_VALUES,
+      AMBIENT_TEMPS_C,
   ):
     # Constraint: when there is no floor reflector (d_reflector == 0), only the
     # zero-gap, zero-CalSil combination is meaningful.
@@ -241,6 +248,7 @@ def enumerate_sweep_points() -> list[SweepPoint]:
             d_hood_inlet_mm=d_hood,
             z_hood_drop_mm=z_hood_drop,
             bung_captured=bung_cap,
+            t_ext_c=t_ext_c,
         )
     )
   return points
@@ -354,7 +362,7 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
 
   # Thermal sources, emissivities, and conductivities.
   cfg.thermal.sources.t_internal_c = constants.DEFAULT_KILN_INTERNAL_C
-  cfg.thermal.sources.t_ext_c = constants.DEFAULT_EXT_TEMP_C
+  cfg.thermal.sources.t_ext_c = point.t_ext_c
   cfg.thermal.sources.u_kiln_side = point.u_kiln_side
   cfg.thermal.sources.u_kiln_top = constants.DEFAULT_U_KILN_TOP
   cfg.thermal.sources.u_kiln_bot = point.u_kiln_side
@@ -697,6 +705,7 @@ SWEEP_PARAM_COLUMNS: tuple[str, ...] = (
     "d_hood_inlet_mm",
     "z_hood_drop_mm",
     "bung_captured",
+    "t_ext_c",
 )
 
 METRIC_COLUMNS: tuple[str, ...] = tuple(
@@ -842,6 +851,7 @@ def export_sweep_csv(
           cfg.geometry.hood.d_hood_inlet_mm,
           cfg.geometry.hood.z_hood_drop_mm,
           cfg.geometry.bung.bung_captured,
+          cfg.thermal.sources.t_ext_c,
       ]
       n_kiln_patches = max(1, cfg.grid.n_theta_kiln * cfg.grid.n_z_kiln)
       metric_values = [
