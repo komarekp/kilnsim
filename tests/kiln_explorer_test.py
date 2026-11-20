@@ -184,7 +184,7 @@ def _default_button_groups() -> dict[str, list[str]]:
       "ctrl-ukiln": ["0.8", "0.5", "0.3"],
       "ctrl-fan": ["300", "350", "400"],
       "ctrl-hood": ["600", "700", "800"],
-      "ctrl-hdrop": ["150", "400", "600"],
+      "ctrl-hdrop": ["150", "400", "600", "800", "1000"],
       "ctrl-dref": ["0", "800"],
       "ctrl-gref": ["0", "20"],
       "ctrl-tref": ["0", "10"],
