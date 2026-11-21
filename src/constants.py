@@ -5,6 +5,8 @@ post-processing metrics, and parametric sweep configuration builders so
 constants are never duplicated across files.
 """
 
+import dataclasses
+
 # ---------------------------------------------------------------------------
 # Fundamental physical constants & unit conversions (SI units)
 # ---------------------------------------------------------------------------
@@ -50,6 +52,13 @@ SSR_LOUVER_MIN_FLOW_KG_S: float = 1.2e-3  # kg / s minimum background leakage
 SSR_BAFFLE_CONV_W_M2K: float = 6.5  # W / (m^2 * K) ventilated standoff gap
 SSR_FACING_COS_MIN: float = 0.70710678  # cos(45 deg) kiln patch selection
 SSR_SUBKILN_CONV_WEIGHT: float = 0.50  # sub-kiln bottom air entering SSR louver
+SSR_HEATSINK_POWER_FRACTION: float = 0.85  # Fraction dissipated via external heatsink
+SSR_HEATSINK_R_TH_AMB_K_W: float = 2.4  # External finned heatsink to ambient (K/W)
+SSR_HEATSINK_UA_INT_W_K: float = 0.11  # Back-plate coupling to internal box air (W/K)
+
+# Open-lid vertical clearance above the kiln drum top rim
+KILN_OPEN_LID_HEIGHT_ABOVE_RIM_MM: float = 615.0
+KILN_OPEN_LID_HEIGHT_ABOVE_RIM_M: float = 0.615
 
 # ---------------------------------------------------------------------------
 # Validation bounds in SI units (metres and dimensionless)
@@ -137,21 +146,22 @@ LIMIT_AAC_C: float = 120.0
 FLOOR_PAD_EMISSIVITY: float = 0.88
 VINYL_FLOOR_EMISSIVITY: float = 0.90
 
-# 2D planar subfloor lateral conduction & 4 steel stand leg fin bridge
+# 2D planar subfloor lateral conduction & 3-legged perimeter tubular steel
+# tripod stand fin bridge with rubber end-cap foot resistance
 FLOOR_2D_CELL_SIZE_M: float = 0.075
 FLOOR_2D_MARGIN_M: float = 0.35
 FLOOR_2D_NEWTON_ITERS: int = 6
 FLOOR_GRID_BOT_QUAD_R: int = 8
 FLOOR_GRID_BOT_QUAD_THETA: int = 24
 FLOOR_UNDER_CORE_FRACTION: float = 0.58
-NUM_KILN_LEGS: int = 4
-KILN_LEG_RADIUS_FRACTION: float = 0.55
-KILN_LEG_METAL_AREA_M2: float = 1.5e-4
-KILN_LEG_PERIMETER_M: float = 0.14
-KILN_LEG_K_W_MK: float = 25.0
+NUM_KILN_LEGS: int = 3
+KILN_LEG_RADIUS_OFFSET_M: float = 0.020
+KILN_LEG_METAL_AREA_M2: float = 1.8e-4
+KILN_LEG_PERIMETER_M: float = 0.12
+KILN_LEG_K_W_MK: float = 45.0
 KILN_LEG_H_EFF_W_M2K: float = 18.0
-KILN_LEG_JACKET_TEMP_WEIGHT: float = 1.0
-KILN_LEG_FOOT_CONTACT_R_K_W: float = 4.0
+KILN_LEG_JACKET_TEMP_WEIGHT: float = 0.25
+KILN_LEG_FOOT_CONTACT_R_K_W: float = 40.0
 
 # ---------------------------------------------------------------------------
 # Coupled steady-state solver numerical parameters
@@ -179,20 +189,20 @@ DEFAULT_GLASS_DOOR_WIDTH_MM: float = 2000.0
 DEFAULT_DOOR_HEIGHT_MM: float = 2100.0
 DEFAULT_CHIMNEY_BLOCKAGE_FRACTION: float = 0.08
 
-DEFAULT_KILN_DIAMETER_MM: float = 700.0
-DEFAULT_KILN_DRUM_HEIGHT_MM: float = 595.0
-DEFAULT_KILN_LID_THICKNESS_MM: float = 75.0
-DEFAULT_KILN_BASE_HEIGHT_MM: float = 210.0
+DEFAULT_KILN_DIAMETER_MM: float = 635.0
+DEFAULT_KILN_DRUM_HEIGHT_MM: float = 531.0
+DEFAULT_KILN_LID_THICKNESS_MM: float = 76.0
+DEFAULT_KILN_BASE_HEIGHT_MM: float = 167.0
 
 DEFAULT_BUNG_ANGLE_DEG: float = 0.0
-DEFAULT_BUNG_RADIUS_MM: float = 415.0
-DEFAULT_BUNG_Z_OFFSET_MM: float = 540.0
+DEFAULT_BUNG_RADIUS_MM: float = 387.5
+DEFAULT_BUNG_Z_OFFSET_MM: float = 490.0
 
 DEFAULT_SSR_ANGLE_DEG: float = -45.0
-DEFAULT_SSR_Z_OFFSET_MM: float = 100.0
-DEFAULT_SSR_WIDTH_MM: float = 190.0
-DEFAULT_SSR_DEPTH_MM: float = 146.5
-DEFAULT_SSR_HEIGHT_MM: float = 430.0
+DEFAULT_SSR_Z_OFFSET_MM: float = 114.0
+DEFAULT_SSR_WIDTH_MM: float = 148.0
+DEFAULT_SSR_DEPTH_MM: float = 148.0
+DEFAULT_SSR_HEIGHT_MM: float = 362.0
 
 DEFAULT_SCREED_THICKNESS_MM: float = 40.0
 DEFAULT_VIP_THICKNESS_MM: float = 20.0
@@ -200,11 +210,13 @@ DEFAULT_HOOD_DUCT_DIAMETER_MM: float = 200.0
 
 DEFAULT_KILN_INTERNAL_C: float = 1280.0
 DEFAULT_EXT_TEMP_C: float = 20.0
-DEFAULT_U_KILN_TOP: float = 2.00
+DEFAULT_U_KILN_SIDE: float = 0.68
+DEFAULT_U_KILN_TOP: float = 1.20
+DEFAULT_U_KILN_BOT: float = 0.50
 DEFAULT_Q_BUNG_OPEN_W: float = 110.0
 DEFAULT_Q_SSR_INTERNAL_W: float = 18.8
 
-DEFAULT_EPS_KILN_SIDE: float = 0.60
+DEFAULT_EPS_KILN_SIDE: float = 0.25
 DEFAULT_EPS_KILN_TOP: float = 0.85
 DEFAULT_EPS_KILN_BOT: float = 0.15
 DEFAULT_EPS_SHIELD: float = 0.90
@@ -226,4 +238,57 @@ DEFAULT_DX_WALL_MM: float = 50.0
 DEFAULT_DZ_WALL_MM: float = 50.0
 DEFAULT_N_THETA_KILN: int = 24
 DEFAULT_N_Z_KILN: int = 6
+
+
+# ---------------------------------------------------------------------------
+# Principled Rohde Ecotop 60 insulation & outer diameter presets
+# ---------------------------------------------------------------------------
+@dataclasses.dataclass(frozen=True)
+class KilnInsulationPreset:
+  """Coupled Ecotop 60 drum diameter and outer-area-referenced U-values."""
+
+  name: str
+  d_kiln_mm: float
+  u_kiln_side: float
+  u_kiln_top: float
+  u_kiln_bot: float
+  r_bung_mm: float
+
+
+KILN_PRESETS_BY_U_SIDE: dict[float, KilnInsulationPreset] = {
+    1.05: KilnInsulationPreset(
+        name="2021",
+        d_kiln_mm=617.0,
+        u_kiln_side=1.05,
+        u_kiln_top=1.80,
+        u_kiln_bot=0.75,
+        r_bung_mm=378.5,
+    ),
+    0.75: KilnInsulationPreset(
+        name="2023_bare_lid",
+        d_kiln_mm=635.0,
+        u_kiln_side=0.75,
+        u_kiln_top=1.70,
+        u_kiln_bot=0.55,
+        r_bung_mm=387.5,
+    ),
+    0.68: KilnInsulationPreset(
+        name="2023_full",
+        d_kiln_mm=635.0,
+        u_kiln_side=0.68,
+        u_kiln_top=1.20,
+        u_kiln_bot=0.50,
+        r_bung_mm=387.5,
+    ),
+}
+
+
+def lookup_kiln_preset(u_kiln_side: float) -> KilnInsulationPreset:
+  """Returns the matching KilnInsulationPreset for `u_kiln_side` within 1e-6."""
+  for key, preset in KILN_PRESETS_BY_U_SIDE.items():
+    if abs(u_kiln_side - key) <= 1e-6:
+      return preset
+  raise KeyError(
+      f"No KilnInsulationPreset configured for u_kiln_side={u_kiln_side!r}."
+  )
 

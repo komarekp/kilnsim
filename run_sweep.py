@@ -96,9 +96,11 @@ _DRY_RUN = flags.DEFINE_boolean(
     "executed (skipping already-completed well-formed outputs) and exit.",
 )
 
+SWEEP_FILENAME_PREFIX: str = "v2_"
+
 # Swept parameter domains.
 KILN_STANDOFFS_MM: tuple[float, ...] = (200.0, 300.0)
-U_KILN_SIDE_VALUES: tuple[float, ...] = (0.8, 0.5, 0.3)
+U_KILN_SIDE_VALUES: tuple[float, ...] = (1.05, 0.75, 0.68)
 PAD_SIZES_MM: tuple[float, ...] = (1200.0,)
 PAD_THICKNESSES_MM: tuple[float, ...] = (0.0, 20.0)
 DOOR_OPEN_VALUES_MM: tuple[float, ...] = (0.0, 150.0)
@@ -138,7 +140,7 @@ class SweepPoint:
   w_shield_mm: float
   d_hood_inlet_mm: float
   bung_captured: bool
-  u_kiln_side: float = 0.8
+  u_kiln_side: float = constants.DEFAULT_U_KILN_SIDE
   z_hood_drop_mm: float = 400.0
   t_ext_c: float = constants.DEFAULT_EXT_TEMP_C
 
@@ -146,6 +148,7 @@ class SweepPoint:
   def experiment_name(self) -> str:
     """Returns a deterministic experiment identifier and filename stem."""
     base_name = (
+        f"{SWEEP_FILENAME_PREFIX}"
         f"standoff{_fmt_num(self.s_kiln_mm)}_"
         f"ukiln{_fmt_num(self.u_kiln_side)}_"
         f"pad{_fmt_num(self.w_floor_pad_mm)}x{_fmt_num(self.t_floor_pad_mm)}_"
@@ -164,8 +167,10 @@ class SweepPoint:
   @property
   def geometry_cache_key(self) -> tuple[float, ...]:
     """Returns the subset of parameters that determine mesh and patch view factors."""
+    preset = constants.lookup_kiln_preset(self.u_kiln_side)
     return (
         self.s_kiln_mm,
+        preset.d_kiln_mm,
         self.w_floor_pad_mm,
         self.t_floor_pad_mm,
         self.d_reflector_mm,
@@ -285,6 +290,7 @@ def reservoir_sample_points(
 
 def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
   """Builds a SimulationConfig protobuf for the given sweep point."""
+  preset = constants.lookup_kiln_preset(point.u_kiln_side)
   cfg = kiln_sim_pb2.SimulationConfig()
   cfg.experiment_name = point.experiment_name
 
@@ -311,17 +317,17 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
   )
   cfg.geometry.room.chimney.seal_chimney_sides = True
 
-  # Kiln geometry.
+  # Kiln geometry (wall standoff measured from cylindrical drum).
   cfg.geometry.kiln.s_kiln_left_mm = point.s_kiln_mm
   cfg.geometry.kiln.s_kiln_back_mm = point.s_kiln_mm
-  cfg.geometry.kiln.d_kiln_mm = constants.DEFAULT_KILN_DIAMETER_MM
+  cfg.geometry.kiln.d_kiln_mm = preset.d_kiln_mm
   cfg.geometry.kiln.h_drum_mm = constants.DEFAULT_KILN_DRUM_HEIGHT_MM
   cfg.geometry.kiln.t_lid_mm = constants.DEFAULT_KILN_LID_THICKNESS_MM
   cfg.geometry.kiln.h_kiln_base_mm = constants.DEFAULT_KILN_BASE_HEIGHT_MM
 
   # Bung geometry.
   cfg.geometry.bung.bung_angle_deg = constants.DEFAULT_BUNG_ANGLE_DEG
-  cfg.geometry.bung.r_bung_mm = constants.DEFAULT_BUNG_RADIUS_MM
+  cfg.geometry.bung.r_bung_mm = preset.r_bung_mm
   cfg.geometry.bung.z_bung_offset_mm = constants.DEFAULT_BUNG_Z_OFFSET_MM
   cfg.geometry.bung.bung_captured = point.bung_captured
 
@@ -363,9 +369,9 @@ def build_config_proto(point: SweepPoint) -> kiln_sim_pb2.SimulationConfig:
   # Thermal sources, emissivities, and conductivities.
   cfg.thermal.sources.t_internal_c = constants.DEFAULT_KILN_INTERNAL_C
   cfg.thermal.sources.t_ext_c = point.t_ext_c
-  cfg.thermal.sources.u_kiln_side = point.u_kiln_side
-  cfg.thermal.sources.u_kiln_top = constants.DEFAULT_U_KILN_TOP
-  cfg.thermal.sources.u_kiln_bot = point.u_kiln_side
+  cfg.thermal.sources.u_kiln_side = preset.u_kiln_side
+  cfg.thermal.sources.u_kiln_top = preset.u_kiln_top
+  cfg.thermal.sources.u_kiln_bot = preset.u_kiln_bot
   cfg.thermal.sources.q_bung_open_w = constants.DEFAULT_Q_BUNG_OPEN_W
   cfg.thermal.sources.q_ssr_internal_w = constants.DEFAULT_Q_SSR_INTERNAL_W
   cfg.thermal.sources.exhaust_fan_cfm = point.exhaust_fan_cfm
@@ -762,6 +768,8 @@ def is_well_formed_output(
         and b"t_exhaust_duct_c:" not in data[:idx]
     ):
       return False
+    if b"z_lid_open_top_mm:" not in data[:idx]:
+      return False
     patch_count = data.count(b"\npatches {\n", idx)
     return patch_count == expected_patch_count(params)
   except Exception:  # pylint: disable=broad-exception-caught
@@ -812,18 +820,22 @@ def _parse_output_header(
 
 
 def export_sweep_csv(
-    output_dir: pathlib.Path, csv_path: pathlib.Path
+    output_dir: pathlib.Path,
+    csv_path: pathlib.Path,
+    filename_prefix: str = SWEEP_FILENAME_PREFIX,
 ) -> int:
   """Exports a CSV with one column per sweep param and non-*_safe metric.
 
   Args:
     output_dir: Directory containing `.out.textproto` result files.
     csv_path: Destination CSV file path.
+    filename_prefix: Only aggregate `.out.textproto` files starting with this
+      prefix so legacy runs in the same directory are excluded.
 
   Returns:
     Number of simulation result rows written to `csv_path`.
   """
-  out_files = sorted(output_dir.glob("*.out.textproto"))
+  out_files = sorted(output_dir.glob(f"{filename_prefix}*.out.textproto"))
   csv_path.parent.mkdir(parents=True, exist_ok=True)
   headers = list(SWEEP_PARAM_COLUMNS) + list(METRIC_COLUMNS)
 

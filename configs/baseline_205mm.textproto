@@ -32,27 +32,27 @@ geometry {
   kiln {
     s_kiln_left_mm: 205.0
     s_kiln_back_mm: 205.0
-    d_kiln_mm: 700.0
-    h_drum_mm: 595.0
-    t_lid_mm: 75.0
-    h_kiln_base_mm: 210.0
+    d_kiln_mm: 635.0
+    h_drum_mm: 531.0
+    t_lid_mm: 76.0
+    h_kiln_base_mm: 167.0
   }
 
   bung {
     # 0.0 deg points along +x directly toward the front sliding glass doors.
     bung_angle_deg: 0.0
-    r_bung_mm: 415.0
-    z_bung_offset_mm: 540.0
+    r_bung_mm: 387.5
+    z_bung_offset_mm: 490.0
     bung_captured: false
   }
 
   ssr {
     # -45.0 deg places the SSR box in the front-left quadrant (between +x and -y).
     ssr_angle_deg: -45.0
-    z_ssr_offset_mm: 100.0
-    w_ssr_mm: 190.0
-    d_ssr_mm: 146.5
-    h_ssr_mm: 430.0
+    z_ssr_offset_mm: 114.0
+    w_ssr_mm: 148.0
+    d_ssr_mm: 148.0
+    h_ssr_mm: 362.0
   }
 
   floor {
@@ -70,9 +70,9 @@ geometry {
     d_hood_duct_mm: 200.0
     z_hood_drop_mm: 400.0
     # Centered directly over the kiln axis:
-    # 25 mm (chimney) + 20 mm (shield) + 205 mm (standoff) + 350 mm (radius) = 600 mm.
-    x_hood_mm: 600.0
-    y_hood_mm: 600.0
+    # 25 mm (chimney) + 20 mm (shield) + 205 mm (standoff) + 317.5 mm (radius) = 567.5 mm.
+    x_hood_mm: 567.5
+    y_hood_mm: 567.5
   }
 }
 
@@ -80,16 +80,16 @@ thermal {
   sources {
     t_internal_c: 1280.0
     t_ext_c: 20.0
-    u_kiln_side: 0.80
-    u_kiln_top: 2.00
-    u_kiln_bot: 0.80
+    u_kiln_side: 0.68
+    u_kiln_top: 1.20
+    u_kiln_bot: 0.50
     q_bung_open_w: 110.0
     q_ssr_internal_w: 18.8
     exhaust_fan_cfm: 350.0
   }
 
   emissivities {
-    eps_kiln_side: 0.60
+    eps_kiln_side: 0.25
     eps_kiln_top: 0.85
     eps_kiln_bot: 0.15
     eps_shield: 0.90

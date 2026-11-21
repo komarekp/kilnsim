@@ -5,6 +5,7 @@ import os
 import pathlib
 
 from absl.testing import absltest
+from src import constants
 from src import io_manager
 from src import params as params_lib
 
@@ -177,28 +178,39 @@ class ParamsTest(absltest.TestCase):
       params_lib.from_proto(cfg_small_pad)
 
     # 2. Moving kiln further from back wall so x_kiln_center + r_kiln > w_floor_pad
+    overflow_x_mm = (
+        p0.w_floor_pad * params_lib.M_TO_MM - min_pad_x_mm
+    ) + 10.0
     cfg_shifted_x = copy.deepcopy(self.base_pb)
-    cfg_shifted_x.geometry.kiln.s_kiln_back_mm += 60.0
+    cfg_shifted_x.geometry.kiln.s_kiln_back_mm += overflow_x_mm
     with self.assertRaises(ValueError):
       params_lib.from_proto(cfg_shifted_x)
 
     # 3. Moving kiln further from left wall so y_kiln_center + r_kiln > w_floor_pad
+    overflow_y_mm = (p0.w_floor_pad * params_lib.M_TO_MM - min_pad_y_mm) + 10.0
     cfg_shifted_y = copy.deepcopy(self.base_pb)
-    cfg_shifted_y.geometry.kiln.s_kiln_left_mm += 60.0
+    cfg_shifted_y.geometry.kiln.s_kiln_left_mm += overflow_y_mm
     with self.assertRaises(ValueError):
       params_lib.from_proto(cfg_shifted_y)
 
   def test_separate_kiln_emissivities_and_deprecated_eps_kiln_fallback(
       self,
   ) -> None:
-    """Verifies eps_kiln_side/top/bot parsing and legacy eps_kiln fallback."""
+    """Verifies Ecotop 60 baseline dimensions, emissivities, and eps_kiln fallback."""
     params = params_lib.from_proto(self.base_pb)
-    self.assertAlmostEqual(params.eps_kiln_side, 0.60, places=6)
+    self.assertAlmostEqual(params.eps_kiln_side, 0.25, places=6)
     self.assertAlmostEqual(params.eps_kiln_top, 0.85, places=6)
     self.assertAlmostEqual(params.eps_kiln_bot, 0.15, places=6)
-    self.assertAlmostEqual(params.h_drum, 0.595, places=6)
-    self.assertAlmostEqual(params.t_lid, 0.075, places=6)
-    self.assertAlmostEqual(params.u_kiln_bot, 0.80, places=6)
+    self.assertAlmostEqual(params.d_kiln, 0.635, places=6)
+    self.assertAlmostEqual(params.h_drum, 0.531, places=6)
+    self.assertAlmostEqual(params.t_lid, 0.076, places=6)
+    self.assertAlmostEqual(params.h_kiln_base, 0.167, places=6)
+    self.assertAlmostEqual(params.w_ssr, 0.148, places=6)
+    self.assertAlmostEqual(params.d_ssr, 0.148, places=6)
+    self.assertAlmostEqual(params.h_ssr, 0.362, places=6)
+    self.assertAlmostEqual(params.u_kiln_side, 0.68, places=6)
+    self.assertAlmostEqual(params.u_kiln_top, 1.20, places=6)
+    self.assertAlmostEqual(params.u_kiln_bot, 0.50, places=6)
 
     cfg_legacy = copy.deepcopy(self.base_pb)
     cfg_legacy.thermal.emissivities.eps_kiln_side = 0.0
@@ -219,6 +231,59 @@ class ParamsTest(absltest.TestCase):
     p_no_ref = params_lib.from_proto(cfg_no_ref)
     self.assertEqual(p_no_ref.d_reflector, 0.0)
     self.assertEqual(p_no_ref.r_reflector, 0.0)
+
+  def test_open_lid_elevation_and_hood_clearance_warning(self) -> None:
+    """Computes open-lid peak height and logs warning when colliding with hood."""
+    cfg_low = copy.deepcopy(self.base_pb)
+    cfg_low.geometry.floor.t_floor_pad_mm = 20.0
+    cfg_low.geometry.kiln.h_kiln_base_mm = 167.0
+    cfg_low.geometry.kiln.h_drum_mm = 531.0
+    cfg_low.geometry.hood.z_hood_drop_mm = 1000.0
+    p_low = params_lib.from_proto(cfg_low)
+    expected_open_mm = (
+        20.0 + 167.0 + 531.0 + constants.KILN_OPEN_LID_HEIGHT_ABOVE_RIM_MM
+    )
+    self.assertAlmostEqual(
+        p_low.z_lid_open_top * params_lib.M_TO_MM, expected_open_mm, places=6
+    )
+    self.assertAlmostEqual(
+        p_low.lid_open_hood_clearance * params_lib.M_TO_MM, 12.0, places=6
+    )
+    derived = p_low.to_derived_proto()
+    self.assertAlmostEqual(derived.z_lid_open_top_mm, expected_open_mm, places=5)
+    self.assertAlmostEqual(derived.lid_open_hood_clearance_mm, 12.0, places=5)
+
+    cfg_high = copy.deepcopy(cfg_low)
+    cfg_high.geometry.kiln.h_kiln_base_mm = 290.0
+    with self.assertLogs(level="WARNING") as logs:
+      p_high = params_lib.from_proto(cfg_high)
+    self.assertAlmostEqual(
+        p_high.lid_open_hood_clearance * params_lib.M_TO_MM, -111.0, places=6
+    )
+    self.assertTrue(
+        any("Open kiln lid peak" in msg for msg in logs.output), logs.output
+    )
+
+  def test_kiln_standoff_measured_from_outer_drum_for_both_diameters(
+      self,
+  ) -> None:
+    """Wall standoff s_kiln_* is measured from the cylindrical drum across presets."""
+    for d_mm in (617.0, 635.0):
+      cfg = copy.deepcopy(self.base_pb)
+      cfg.geometry.kiln.d_kiln_mm = d_mm
+      cfg.geometry.kiln.s_kiln_left_mm = 200.0
+      cfg.geometry.kiln.s_kiln_back_mm = 200.0
+      p = params_lib.from_proto(cfg)
+      self.assertAlmostEqual(
+          p.x_kiln_center - p.r_kiln - p.x_shield_front_back_wall,
+          0.200,
+          places=6,
+      )
+      self.assertAlmostEqual(
+          p.y_kiln_center - p.r_kiln - p.y_shield_front_left_wall,
+          0.200,
+          places=6,
+      )
 
 
 if __name__ == "__main__":

@@ -292,6 +292,10 @@ message SimulationOutput {
     double d_chimney_eff_mm = 13;
     // Unshielded 1D thermal transmittance of the structural AAC wall (W/m^2*K).
     double u_aac_wall = 14;
+    // Peak vertical elevation of the fully opened kiln lid handle above z = 0 (mm).
+    double z_lid_open_top_mm = 15;
+    // Vertical clearance from open kiln lid handle to canopy hood inlet (mm; <0 collides).
+    double lid_open_hood_clearance_mm = 16;
   }
 
   // Key engineering evaluation metrics and safety pass/fail flags.
@@ -352,6 +356,10 @@ message SimulationOutput {
     bool ceiling_safe = 27;
     // Steady-state mixed air temperature inside the ceiling exhaust duct (C).
     double t_exhaust_duct_c = 28;
+    // Vertical clearance from open kiln lid handle to overhead hood rim (mm).
+    double lid_open_hood_clearance_mm = 29;
+    // True if lid_open_hood_clearance_mm > 0.0 (no collision when opening lid).
+    bool lid_open_clearance_safe = 30;
   }
 
   // Resolved thermal state of an individual discretized surface patch.

@@ -136,6 +136,16 @@ class MeshTest(absltest.TestCase):
         bot_patches[0].emissivity, self.params.eps_kiln_bot, places=6
     )
 
+  def test_ssr_box_patch_areas_match_measured_enclosure_dimensions(self) -> None:
+    """Verifies SSR_BOX patches match the 148 x 148 x 362 mm enclosure."""
+    ssr_patches = self.mesh.get_patches_by_type(mesh_lib.SurfaceType.SSR_BOX)
+    self.assertLen(ssr_patches, 3)
+    expected_area = 0.148 * 0.362
+    for p in ssr_patches:
+      self.assertAlmostEqual(p.area_m2, expected_area, places=6)
+      self.assertAlmostEqual(p.bounds_min_m[2], self.params.z_ssr_bot, places=6)
+      self.assertAlmostEqual(p.bounds_max_m[2], self.params.z_ssr_top, places=6)
+
 
 if __name__ == "__main__":
   absltest.main()

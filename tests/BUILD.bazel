@@ -11,6 +11,7 @@ py_test(
     data = ["//:configs"],
     deps = [
         "//proto:kiln_sim_py_pb2",
+        "//src:constants",
         "//src:io_manager",
         "//src:params",
     ],
@@ -91,6 +92,7 @@ py_test(
     srcs = ["run_sweep_test.py"],
     deps = [
         "//:run_sweep_lib",
+        "//src:constants",
         "//src:io_manager",
     ],
 )

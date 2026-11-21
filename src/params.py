@@ -158,6 +158,8 @@ class SimParams:
   z_drum_bot: float
   h_kiln_total: float
   z_kiln_top: float
+  z_lid_open_top: float
+  lid_open_hood_clearance: float
   z_ssr_bot: float
   z_ssr_top: float
   z_bung: float
@@ -284,6 +286,8 @@ class SimParams:
         z_hood_inlet_mm=self.z_hood_inlet * M_TO_MM,
         d_chimney_eff_mm=self.d_chimney_eff * M_TO_MM,
         u_aac_wall=self.u_aac_wall,
+        z_lid_open_top_mm=self.z_lid_open_top * M_TO_MM,
+        lid_open_hood_clearance_mm=self.lid_open_hood_clearance * M_TO_MM,
     )
 
 
@@ -385,6 +389,14 @@ def validate_params(params: SimParams) -> None:
         f"Hood inlet elevation ({params.z_hood_inlet:.3f} m) must sit at least "
         f"{MIN_HOOD_CLEARANCE_M} m above the closed kiln lid "
         f"({params.z_kiln_top:.3f} m)."
+    )
+  if params.lid_open_hood_clearance < 0.0:
+    logging.warning(
+        "Open kiln lid peak (%.1f mm) exceeds canopy hood inlet elevation "
+        "(%.1f mm) by %.1f mm; lid cannot open fully under a fixed hood.",
+        params.z_lid_open_top * M_TO_MM,
+        params.z_hood_inlet * M_TO_MM,
+        -params.lid_open_hood_clearance * M_TO_MM,
     )
   for name, eps in [
       ("eps_kiln_side", params.eps_kiln_side),
@@ -506,6 +518,9 @@ def from_proto(config: kiln_sim_pb2.SimulationConfig) -> SimParams:
   z_drum_bot = z_pad_top + h_kiln_base
   h_kiln_total = h_drum + t_lid
   z_kiln_top = z_drum_bot + h_kiln_total
+  z_lid_open_top = (
+      z_drum_bot + h_drum + constants.KILN_OPEN_LID_HEIGHT_ABOVE_RIM_M
+  )
   z_ssr_bot = z_drum_bot + z_ssr_offset
   z_ssr_top = z_ssr_bot + h_ssr
   z_bung = z_drum_bot + z_bung_offset
@@ -513,6 +528,7 @@ def from_proto(config: kiln_sim_pb2.SimulationConfig) -> SimParams:
   y_bung = y_kiln_center + r_bung * math.sin(bung_angle_rad)
   z_mirror = 2.0 * z_reflector_top - z_drum_bot
   z_hood_inlet = h_wall - z_hood_drop
+  lid_open_hood_clearance = z_hood_inlet - z_lid_open_top
 
   # Derived hydraulic and conductive parameters.
   d_chimney_eff = d_chimney * (1.0 - blockage)
@@ -621,6 +637,8 @@ def from_proto(config: kiln_sim_pb2.SimulationConfig) -> SimParams:
       z_drum_bot=z_drum_bot,
       h_kiln_total=h_kiln_total,
       z_kiln_top=z_kiln_top,
+      z_lid_open_top=z_lid_open_top,
+      lid_open_hood_clearance=lid_open_hood_clearance,
       z_ssr_bot=z_ssr_bot,
       z_ssr_top=z_ssr_top,
       z_bung=z_bung,

@@ -167,13 +167,31 @@ def _solve_floor_sensor_temp_k(
   )
 
 
+def _kiln_leg_positions_m(
+    params: params_lib.SimParams,
+) -> list[tuple[float, float]]:
+  """Returns (x, y) floor contact coordinates for the kiln tripod stand legs."""
+  n_legs = max(0, int(constants.NUM_KILN_LEGS))
+  if n_legs == 0 or params.r_kiln <= 0.0:
+    return []
+  r_leg = params.r_kiln + constants.KILN_LEG_RADIUS_OFFSET_M
+  d_phi = (2.0 * math.pi) / n_legs
+  return [
+      (
+          params.x_kiln_center + r_leg * math.cos(i * d_phi),
+          params.y_kiln_center + r_leg * math.sin(i * d_phi),
+      )
+      for i in range(n_legs)
+  ]
+
+
 def _solve_floor_2d_field(
     mesh: mesh_lib.SurfaceMesh,
     vf_sys: vf_lib.ViewFactorSystem,
     solution: solver_lib.SolverSolution,
     params: params_lib.SimParams,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-  """Solves 2D lateral pad+screed conduction coupled to VIP and 4 stand legs."""
+  """Solves 2D lateral pad+screed conduction coupled to VIP and stand legs."""
   xs = vf_sys.floor_grid_x_m
   ys = vf_sys.floor_grid_y_m
   vf_grid = vf_sys.floor_grid_vf
@@ -267,7 +285,7 @@ def _solve_floor_2d_field(
   b_fixed = np.zeros(2 * n_cells, dtype=np.float64)
   b_fixed[scr_nodes] += g_2_ext * params.t_ext_k
 
-  # 4 steel kiln stand leg 1D fin bridges conducted to the subfloor surface.
+  # Tripod kiln stand leg 1D fin bridges conducted to the subfloor surface.
   stypes = mesh.surface_types
   t_amb_k = float(solution.room.t_room_lower_k)
   side_mask = stypes == int(mesh_lib.SurfaceType.KILN_SIDE)
@@ -300,16 +318,7 @@ def _solve_floor_2d_field(
         (1.0 / max(g_self, 1e-9)) + constants.KILN_LEG_FOOT_CONTACT_R_K_W
     )
 
-    r_leg = constants.KILN_LEG_RADIUS_FRACTION * params.r_kiln
-    leg_angles = (
-        0.25 * math.pi,
-        0.75 * math.pi,
-        -0.75 * math.pi,
-        -0.25 * math.pi,
-    )[: constants.NUM_KILN_LEGS]
-    for phi in leg_angles:
-      x_leg = params.x_kiln_center + r_leg * math.cos(phi)
-      y_leg = params.y_kiln_center + r_leg * math.sin(phi)
+    for x_leg, y_leg in _kiln_leg_positions_m(params):
       ix = int(np.argmin(np.abs(xs - x_leg)))
       iy = int(np.argmin(np.abs(ys - y_leg)))
       leg_cell = ix * ny + iy
@@ -572,6 +581,12 @@ def compute_safety_metrics(
     if not np.any(under_mask):
       under_mask = np.zeros_like(in_pad_2d)
       under_mask.flat[int(np.argmin(r_grid))] = True
+    if params.r_reflector > 0.0:
+      for x_leg, y_leg in _kiln_leg_positions_m(params):
+        ix = int(np.argmin(np.abs(xs - x_leg)))
+        iy = int(np.argmin(np.abs(ys - y_leg)))
+        if in_pad_2d[ix, iy] and under_ref_2d[ix, iy]:
+          under_mask[ix, iy] = True
 
     t_pad_center_k = float(np.max(t_surf_2d_k[under_mask]))
     t_floor_pad_under_reflector_c = t_pad_center_k - params_lib.KELVIN_OFFSET
@@ -822,6 +837,12 @@ def compute_safety_metrics(
   t_kiln_side_c = t_front_c[kiln_side_mask]
   delta_t_kiln_skin_c = float(np.max(t_kiln_side_c) - np.min(t_kiln_side_c))
 
+  # 8. Open-lid vertical clearance under canopy hood rim
+  lid_open_hood_clearance_mm = (
+      params.lid_open_hood_clearance * params_lib.M_TO_MM
+  )
+  lid_open_clearance_safe = lid_open_hood_clearance_mm > 0.0
+
   return kiln_sim_pb2.SimulationOutput.SafetyMetrics(
       t_gypsum_max_left_c=t_gyp_left_max_c,
       t_gypsum_max_back_c=t_gyp_back_max_c,
@@ -853,6 +874,8 @@ def compute_safety_metrics(
       t_ceiling_max_c=t_ceiling_max_c,
       ceiling_safe=ceiling_safe,
       t_exhaust_duct_c=t_exhaust_duct_c,
+      lid_open_hood_clearance_mm=lid_open_hood_clearance_mm,
+      lid_open_clearance_safe=lid_open_clearance_safe,
   )
 
 

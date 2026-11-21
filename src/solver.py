@@ -206,8 +206,27 @@ def _solve_ssr_internal_air(
 
   t_baf_k = 0.5 * (t_k_ssr + t_lower_k)
   t_ssr_4_k = 0.5 * (t_ssr_case_3_k + t_baf_k)
+  # Eliminate the external black finned heatsink node T_hs algebraically:
+  #   f_hs * Q = g_hs_amb * (T_hs - T_lower) + g_hs_int * (T_hs - T_air)
+  # -> heat entering internal box air is q_ssr_air_eff - g_hs_eff * (T_air - T_lower).
+  f_hs = constants.SSR_HEATSINK_POWER_FRACTION
+  g_hs_amb = (
+      1.0 / max(constants.SSR_HEATSINK_R_TH_AMB_K_W, 1e-9)
+      if constants.SSR_HEATSINK_R_TH_AMB_K_W < 1e8
+      else 0.0
+  )
+  g_hs_int = constants.SSR_HEATSINK_UA_INT_W_K
+  g_hs_sum = g_hs_amb + g_hs_int
+  if g_hs_sum > 1e-12:
+    alpha_hs = g_hs_int / g_hs_sum
+    g_hs_eff = (g_hs_amb * g_hs_int) / g_hs_sum
+  else:
+    alpha_hs = 1.0
+    g_hs_eff = 0.0
+  q_ssr_air_eff = ((1.0 - f_hs) + alpha_hs * f_hs) * params.q_ssr_internal_w
+
   t_air_k = 0.5 * (t_ssr_inlet_k + t_ssr_case_3_k) + (
-      params.q_ssr_internal_w / max(ua_box, 1.0)
+      q_ssr_air_eff / max(ua_box + g_hs_eff, 1.0)
   )
   t_ssr_case_k = t_ssr_case_3_k
   for _ in range(8):
@@ -248,8 +267,11 @@ def _solve_ssr_internal_air(
     )
     mcp = m_dot_louver * constants.AIR_CP
     t_air_new = (
-        params.q_ssr_internal_w + mcp * t_ssr_inlet_k + ua_box * t_ssr_case_k
-    ) / (mcp + ua_box)
+        q_ssr_air_eff
+        + g_hs_eff * t_lower_k
+        + mcp * t_ssr_inlet_k
+        + ua_box * t_ssr_case_k
+    ) / (g_hs_eff + mcp + ua_box)
     t_air_k = 0.5 * t_air_k + 0.5 * t_air_new
 
   return t_air_k, t_ssr_case_k
@@ -637,6 +659,7 @@ def solve_thermal_system(
     q_cond_in[ssr_mask] = (
         constants.H_CONV_SSR_INTERNAL_W_M2K * (t_ssr_air_k - t_safe[ssr_mask])
     )
+    # Net SSR thermal release into lower room air (external heatsink + louvers + 4th wall).
     q_ssr_louver_w = params.q_ssr_internal_w - (
         float(np.sum(mesh.areas[ssr_mask] * q_cond_in[ssr_mask]))
         if np.any(ssr_mask)

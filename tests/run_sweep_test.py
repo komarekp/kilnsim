@@ -9,6 +9,7 @@ import unittest.mock
 
 from absl import logging
 import run_sweep
+from src import constants
 from src import io_manager
 
 
@@ -16,10 +17,10 @@ class RunSweepAndLoggingTest(unittest.TestCase):
   """Tests for sweep execution and Abseil logging directory initialization."""
 
   def test_run_geometry_group_solves_and_writes_output(self) -> None:
-    """Verifies _run_geometry_group solves a config and writes .out.textproto."""
+    """Verifies _run_geometry_group solves a config and writes v2_-prefixed output."""
     point = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
-        u_kiln_side=0.8,
+        u_kiln_side=0.68,
         w_floor_pad_mm=1200.0,
         t_floor_pad_mm=0.0,
         w_door_open_mm=150.0,
@@ -33,15 +34,47 @@ class RunSweepAndLoggingTest(unittest.TestCase):
         d_hood_inlet_mm=800.0,
         bung_captured=True,
     )
-    self.assertIn("ukiln0.8", point.experiment_name)
+    self.assertTrue(point.experiment_name.startswith("v2_"))
+    self.assertIn("ukiln0.68", point.experiment_name)
     cfg = run_sweep.build_config_proto(point)
-    self.assertAlmostEqual(cfg.thermal.sources.u_kiln_side, 0.8)
-    self.assertAlmostEqual(cfg.thermal.sources.u_kiln_bot, 0.8)
-    self.assertAlmostEqual(cfg.thermal.emissivities.eps_kiln_side, 0.60)
+    self.assertAlmostEqual(cfg.thermal.sources.u_kiln_side, 0.68)
+    self.assertAlmostEqual(cfg.thermal.sources.u_kiln_top, 1.20)
+    self.assertAlmostEqual(cfg.thermal.sources.u_kiln_bot, 0.50)
+    self.assertAlmostEqual(cfg.thermal.emissivities.eps_kiln_side, 0.25)
     self.assertAlmostEqual(cfg.thermal.emissivities.eps_kiln_top, 0.85)
     self.assertAlmostEqual(cfg.thermal.emissivities.eps_kiln_bot, 0.15)
-    self.assertAlmostEqual(cfg.geometry.kiln.h_drum_mm, 595.0)
-    self.assertAlmostEqual(cfg.geometry.kiln.t_lid_mm, 75.0)
+    self.assertAlmostEqual(cfg.geometry.kiln.d_kiln_mm, 635.0)
+    self.assertAlmostEqual(cfg.geometry.kiln.h_drum_mm, 531.0)
+    self.assertAlmostEqual(cfg.geometry.kiln.t_lid_mm, 76.0)
+    self.assertAlmostEqual(cfg.geometry.kiln.h_kiln_base_mm, 167.0)
+    self.assertAlmostEqual(cfg.geometry.ssr.w_ssr_mm, 148.0)
+    self.assertAlmostEqual(cfg.geometry.ssr.d_ssr_mm, 148.0)
+    self.assertAlmostEqual(cfg.geometry.ssr.h_ssr_mm, 362.0)
+    self.assertAlmostEqual(cfg.geometry.ssr.z_ssr_offset_mm, 114.0)
+    self.assertAlmostEqual(cfg.geometry.bung.r_bung_mm, 387.5)
+    self.assertAlmostEqual(cfg.geometry.bung.z_bung_offset_mm, 490.0)
+    # Standoff is measured from the outer drum, and hood centers on the drum axis.
+    self.assertAlmostEqual(cfg.geometry.hood.x_hood_mm, 12.5 + 200.0 + 317.5)
+    self.assertAlmostEqual(cfg.geometry.hood.y_hood_mm, 12.5 + 200.0 + 317.5)
+
+    # Also verify the 2021 and 2023_bare_lid presets map diameters & U-values cleanly.
+    point_2021 = dataclasses.replace(point, u_kiln_side=1.05)
+    cfg_2021 = run_sweep.build_config_proto(point_2021)
+    self.assertAlmostEqual(cfg_2021.geometry.kiln.d_kiln_mm, 617.0)
+    self.assertAlmostEqual(cfg_2021.geometry.bung.r_bung_mm, 378.5)
+    self.assertAlmostEqual(cfg_2021.thermal.sources.u_kiln_top, 1.80)
+    self.assertAlmostEqual(cfg_2021.thermal.sources.u_kiln_bot, 0.75)
+    self.assertAlmostEqual(
+        cfg_2021.geometry.hood.x_hood_mm, 12.5 + 200.0 + 308.5
+    )
+
+    point_bare = dataclasses.replace(point, u_kiln_side=0.75)
+    cfg_bare = run_sweep.build_config_proto(point_bare)
+    self.assertAlmostEqual(cfg_bare.geometry.kiln.d_kiln_mm, 635.0)
+    self.assertAlmostEqual(cfg_bare.thermal.sources.u_kiln_top, 1.70)
+    self.assertAlmostEqual(cfg_bare.thermal.sources.u_kiln_bot, 0.55)
+    self.assertNotEqual(point_2021.geometry_cache_key, point.geometry_cache_key)
+    self.assertEqual(point_bare.geometry_cache_key, point.geometry_cache_key)
     # Use a coarser grid in the unit test for speed.
     cfg.grid.dx_wall_mm = 200.0
     cfg.grid.dz_wall_mm = 200.0
@@ -104,7 +137,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     """Verifies start logging of experiment_name and dt_room_change in failure msg."""
     point = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
-        u_kiln_side=0.5,
+        u_kiln_side=0.75,
         w_floor_pad_mm=1200.0,
         t_floor_pad_mm=0.0,
         w_door_open_mm=150.0,
@@ -166,7 +199,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     """Verifies CSV export has sweep param columns and non-*_safe metric columns."""
     point = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
-        u_kiln_side=0.3,
+        u_kiln_side=1.05,
         w_floor_pad_mm=1200.0,
         t_floor_pad_mm=0.0,
         w_door_open_mm=150.0,
@@ -193,6 +226,11 @@ class RunSweepAndLoggingTest(unittest.TestCase):
       output_dir.mkdir()
       run_sweep.write_config_textproto(cfg, config_path)
       run_sweep._run_geometry_group([str(config_path)], str(output_dir))
+
+      # Unprefixed legacy outputs in the same directory must be ignored.
+      (output_dir / "legacy_unprefixed.out.textproto").write_text(
+          "not_valid_proto: true\n", encoding="utf-8"
+      )
 
       csv_path = tmp_path / "sweep_summary.csv"
       rows_written = run_sweep.export_sweep_csv(output_dir, csv_path)
@@ -235,6 +273,8 @@ class RunSweepAndLoggingTest(unittest.TestCase):
       self.assertIn("t_ceiling_max_c", headers)
       self.assertIn("t_exhaust_duct_c", headers)
       self.assertIn("t_kiln_skin_max_c", headers)
+      self.assertIn("lid_open_hood_clearance_mm", headers)
+      self.assertNotIn("lid_open_clearance_safe", headers)
 
       row_dict = dict(zip(headers, lines[1].split(",")))
       self.assertGreater(float(row_dict["t_kiln_skin_max_c"]), 50.0)
@@ -271,7 +311,8 @@ class RunSweepAndLoggingTest(unittest.TestCase):
   def test_sweep_parameter_domains_and_skip_well_formed_outputs(self) -> None:
     """Verifies updated parameter domains, output validation, and dry_run."""
     all_points = run_sweep.enumerate_sweep_points()
-    self.assertEqual({pt.u_kiln_side for pt in all_points}, {0.8, 0.5, 0.3})
+    self.assertEqual(len(all_points), 21600)
+    self.assertEqual({pt.u_kiln_side for pt in all_points}, {1.05, 0.75, 0.68})
     self.assertEqual({pt.w_floor_pad_mm for pt in all_points}, {1200.0})
     self.assertEqual(
         {pt.d_hood_inlet_mm for pt in all_points}, {600.0, 700.0, 800.0}
@@ -346,7 +387,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     """Verifies mesh is shared across hood sizes while VFs/LU reuse across non-hood params."""
     pt_hood700_cfm350 = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
-        u_kiln_side=0.8,
+        u_kiln_side=0.68,
         w_floor_pad_mm=1200.0,
         t_floor_pad_mm=0.0,
         w_door_open_mm=150.0,
@@ -416,7 +457,7 @@ class RunSweepAndLoggingTest(unittest.TestCase):
     """Changing z_hood_drop_mm in a group recomputes VFs and matches standalone solve."""
     pt_drop150 = run_sweep.SweepPoint(
         s_kiln_mm=200.0,
-        u_kiln_side=0.8,
+        u_kiln_side=0.68,
         w_floor_pad_mm=1200.0,
         t_floor_pad_mm=0.0,
         w_door_open_mm=150.0,

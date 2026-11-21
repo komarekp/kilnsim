@@ -124,6 +124,7 @@ class ViewFactorsTest(absltest.TestCase):
     # cone of the reflector rim widens and blocks more of the kiln bottom from
     # reaching vinyl_edge_x.
     cfg_low = copy.deepcopy(self.base_pb)
+    cfg_low.geometry.kiln.h_kiln_base_mm = 210.0
     cfg_low.geometry.floor.d_reflector_mm = 600.0
     cfg_low.geometry.floor.t_reflector_calsil_mm = 0.0
     cfg_low.geometry.floor.g_floor_reflector_mm = 20.0
@@ -192,6 +193,7 @@ class ViewFactorsTest(absltest.TestCase):
     # bottom (g_floor_reflector = 180 mm) changes the shadow angle and reduces
     # the visible portion of the kiln bottom from pad_edge_room.
     cfg_low = copy.deepcopy(self.base_pb)
+    cfg_low.geometry.kiln.h_kiln_base_mm = 210.0
     cfg_low.geometry.floor.d_reflector_mm = 600.0
     cfg_low.geometry.floor.t_reflector_calsil_mm = 0.0
     cfg_low.geometry.floor.g_floor_reflector_mm = 20.0
@@ -268,7 +270,7 @@ class ViewFactorsTest(absltest.TestCase):
   ) -> None:
     """Overhanging polished reflector bounces kiln side & bottom rays to walls."""
     cfg_narrow = copy.deepcopy(self.base_pb)
-    cfg_narrow.geometry.floor.d_reflector_mm = 700.0  # r_ref == r_kiln (350 mm)
+    cfg_narrow.geometry.floor.d_reflector_mm = cfg_narrow.geometry.kiln.d_kiln_mm
     cfg_narrow.geometry.floor.w_floor_pad_mm = 1200.0
     p_narrow = params_lib.from_proto(cfg_narrow)
     m_narrow = mesh_lib.build_mesh(p_narrow)
@@ -360,7 +362,7 @@ class ViewFactorsTest(absltest.TestCase):
   ) -> None:
     """Overhanging polished reflector bounces kiln radiation to ceiling sensors."""
     cfg_narrow = copy.deepcopy(self.base_pb)
-    cfg_narrow.geometry.floor.d_reflector_mm = 700.0  # r_ref == r_kiln (350 mm)
+    cfg_narrow.geometry.floor.d_reflector_mm = cfg_narrow.geometry.kiln.d_kiln_mm
     cfg_narrow.geometry.floor.w_floor_pad_mm = 1200.0
     p_narrow = params_lib.from_proto(cfg_narrow)
     m_narrow = mesh_lib.build_mesh(p_narrow)
